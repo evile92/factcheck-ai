@@ -26,4 +26,18 @@ describe('Text & Numeral Utilities (Western Digit Enforcement)', () => {
     expect(formattedEn).toMatch(/2026/);
     expect(formattedEn).toMatch(/September/i);
   });
+
+  it('generates bilingual search queries for Arabic input', async () => {
+    const { getBilingualQueries } = await import('../lib/language');
+    const { arQuery, enQuery } = await getBilingualQueries('اغتيال خامنئي في طهران', 'ar');
+    expect(arQuery).toContain('خامنئي');
+    expect(enQuery.toLowerCase()).toMatch(/khamenei|assassination/i);
+  });
+
+  it('generates bilingual search queries for English input', async () => {
+    const { getBilingualQueries } = await import('../lib/language');
+    const { arQuery, enQuery } = await getBilingualQueries('WHO announces cure for cancer', 'en');
+    expect(enQuery).toContain('cancer');
+    expect(arQuery).toMatch(/سرطان|علاج/);
+  });
 });

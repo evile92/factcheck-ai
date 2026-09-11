@@ -106,7 +106,17 @@ export class EvidenceAggregator {
 
         if (hasRefutation) {
           computedStance = 'refutes';
-        } else if (hasConfirmation || item.sourceType === 'wiki' && (text.includes('اغتيال') || text.includes('مقتل') || text.includes('وفاة'))) {
+        } else if (
+          hasConfirmation ||
+          (item.sourceType === 'wiki' &&
+            (text.includes('اغتيال') ||
+              text.includes('مقتل') ||
+              text.includes('وفاة') ||
+              text.includes('assassinated') ||
+              text.includes('assassination') ||
+              text.includes('killed') ||
+              text.includes('death')))
+        ) {
           computedStance = 'supports';
         }
       }

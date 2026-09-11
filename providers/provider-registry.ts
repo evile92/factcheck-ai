@@ -7,6 +7,7 @@ import { OpenSearchProvider } from './open-search-provider';
 import { AcademicProvider } from './academic-provider';
 import { EvidenceItem, ProviderHealth } from '@/types';
 import { providerCache } from '@/lib/cache';
+import { getBilingualQueries } from '@/lib/language';
 
 export class ProviderRegistry {
   private providers: IProvider[] = [];
@@ -35,39 +36,64 @@ export class ProviderRegistry {
   }
 
   /**
-   * Dispatches queries to all suitable providers concurrently.
+   * Dispatches bilingual queries to all suitable providers concurrently.
+   * Searches both Arabic media and English/international sources simultaneously.
    */
   async searchAll(query: string, language = 'ar', isScientific = false): Promise<EvidenceItem[]> {
-    const cacheKey = `search:${language}:${query}:${isScientific}`;
+    const cacheKey = `search:bilingual:${query}:${isScientific}`;
     const cached = providerCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const tasks = this.providers.map(async (provider) => {
-      // If query is not scientific, can skip academic provider or let it run with low priority
-      if (provider.category === 'academic' && !isScientific) {
-        return null;
+    // Retrieve paired bilingual queries (Arabic & English)
+    const { arQuery, enQuery } = await getBilingualQueries(query, language);
+
+    const tasks: Promise<ProviderResponse | null>[] = [];
+
+    for (const provider of this.providers) {
+      if (provider.category === 'academic') {
+        if (isScientific) {
+          // CrossRef DOIs are predominantly in English
+          tasks.push(provider.search(enQuery || arQuery).catch(() => null));
+        }
+        continue;
       }
 
-      try {
-        const res = await provider.search(query, language);
-        const stats = this.healthStats.get(provider.name);
-        if (stats) {
-          stats.lastLatency = res.latencyMs;
-          stats.lastChecked = new Date().toISOString();
-          if (!res.success) stats.errorCount++;
-        }
-        return res;
-      } catch (err) {
-        const stats = this.healthStats.get(provider.name);
-        if (stats) {
-          stats.errorCount++;
-          stats.lastChecked = new Date().toISOString();
-        }
-        return null;
+      // 1. Arabic index search
+      if (arQuery) {
+        tasks.push(
+          (async () => {
+            try {
+              const res = await provider.search(arQuery, 'ar');
+              const stats = this.healthStats.get(provider.name);
+              if (stats) {
+                stats.lastLatency = res.latencyMs;
+                stats.lastChecked = new Date().toISOString();
+                if (!res.success) stats.errorCount++;
+              }
+              return res;
+            } catch {
+              return null;
+            }
+          })()
+        );
       }
-    });
+
+      // 2. English / International index search (in parallel)
+      if (enQuery && enQuery.trim().toLowerCase() !== arQuery.trim().toLowerCase()) {
+        tasks.push(
+          (async () => {
+            try {
+              const res = await provider.search(enQuery, 'en');
+              return res;
+            } catch {
+              return null;
+            }
+          })()
+        );
+      }
+    }
 
     const results = await Promise.allSettled(tasks);
     const aggregatedEvidence: EvidenceItem[] = [];

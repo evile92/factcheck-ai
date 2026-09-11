@@ -1,0 +1,91 @@
+@import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --accent: #0f172a;
+}
+
+.dark {
+  --bg-main: #0c0d0e;
+  --bg-card: #151619;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --border-subtle: #222327;
+  --border-strong: #32353b;
+  --accent: #f8fafc;
+}
+
+html, body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', 'Helvetica Neue', Arial, sans-serif;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Subtle editorial scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+/* Editorial stamp borders */
+.stamp-true {
+  border-left: 5px solid #16a34a !important;
+}
+[dir="rtl"] .stamp-true {
+  border-left: 1px solid var(--border-subtle) !important;
+  border-right: 5px solid #16a34a !important;
+}
+
+.stamp-false {
+  border-left: 5px solid #dc2626 !important;
+}
+[dir="rtl"] .stamp-false {
+  border-left: 1px solid var(--border-subtle) !important;
+  border-right: 5px solid #dc2626 !important;
+}
+
+.stamp-misleading {
+  border-left: 5px solid #ea580c !important;
+}
+[dir="rtl"] .stamp-misleading {
+  border-left: 1px solid var(--border-subtle) !important;
+  border-right: 5px solid #ea580c !important;
+}
+
+.stamp-partly {
+  border-left: 5px solid #d97706 !important;
+}
+[dir="rtl"] .stamp-partly {
+  border-left: 1px solid var(--border-subtle) !important;
+  border-right: 5px solid #d97706 !important;
+}
+
+.stamp-unverified {
+  border-left: 5px solid #64748b !important;
+}
+[dir="rtl"] .stamp-unverified {
+  border-left: 1px solid var(--border-subtle) !important;
+  border-right: 5px solid #64748b !important;
+}

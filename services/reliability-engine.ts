@@ -20,12 +20,20 @@ const TIER_1_DOMAINS = new Set([
 ]);
 
 const TIER_2_DOMAINS = new Set([
-  // Wire agencies & accredited fact checkers
+  // Primary international wire services & accredited fact checkers
   'reuters.com',
   'apnews.com',
+  'ap.org',
   'afp.com',
+  'bloomberg.com',
   'bbc.com',
   'bbc.co.uk',
+  'dw.com',
+  'spa.gov.sa',
+  'wam.ae',
+  'xinhuanet.com',
+  'news.cn',
+  'aa.com.tr',
   'factcheck.org',
   'snopes.com',
   'politifact.com',
@@ -43,19 +51,32 @@ const TIER_2_DOMAINS = new Set([
 const TIER_3_DOMAINS = new Set([
   // Mainstream news media
   'aljazeera.net',
-  'alarabiya.net',
+  'aljazeera.com',
   'france24.com',
-  'dw.com',
   'skynewsarabia.com',
+  'news.sky.com',
+  'alarabiya.net',
   'theguardian.com',
   'nytimes.com',
   'washingtonpost.com',
   'cnn.com',
-  'bloomberg.com',
   'lemonde.fr',
-  'elwatannews.com',
-  'ahram.org.eg',
+  'asharq.com',
+  'independent.co.uk',
+  'independentarabia.com',
+  'aawsat.com',
+  'alquds.co.uk',
+  'arabi21.com',
   'youm7.com',
+  'ahram.org.eg',
+  'elwatannews.com',
+  'alhurra.com',
+  'alhadath.net',
+  'almasryalyoum.com',
+  'shorouknews.com',
+  'albayan.ae',
+  'alkhaleej.ae',
+  'echaab.dz',
 ]);
 
 const SATIRE_AND_TIER_5_DOMAINS = new Set([
@@ -92,14 +113,19 @@ export class SourceReliabilityEngine {
       return { tier: 1, score: 0.95, isSatire: false };
     }
 
-    // Tier 2: Wire services, certified fact-checkers, curated encyclopedias
-    if (TIER_2_DOMAINS.has(cleanDomain) || cleanDomain.includes('factcheck') || cleanDomain.includes('wikipedia')) {
-      return { tier: 2, score: 0.88, isSatire: false };
+    // Wikipedia: Curated encyclopedia reference (scored below live wire services)
+    if (cleanDomain.includes('wikipedia') || sourceType === 'wiki') {
+      return { tier: 2, score: 0.78, isSatire: false };
+    }
+
+    // Tier 2: Primary wire services and accredited fact-checkers (highest priority for news)
+    if (TIER_2_DOMAINS.has(cleanDomain) || cleanDomain.includes('factcheck')) {
+      return { tier: 2, score: 0.93, isSatire: false };
     }
 
     // Tier 3: Mainstream news outlets
     if (TIER_3_DOMAINS.has(cleanDomain)) {
-      return { tier: 3, score: 0.75, isSatire: false };
+      return { tier: 3, score: 0.85, isSatire: false };
     }
 
     // Fallbacks based on sourceType
@@ -107,10 +133,10 @@ export class SourceReliabilityEngine {
       return { tier: 1, score: 0.92, isSatire: false };
     }
     if (sourceType === 'factcheck') {
-      return { tier: 2, score: 0.85, isSatire: false };
+      return { tier: 2, score: 0.88, isSatire: false };
     }
-    if (sourceType === 'news') {
-      return { tier: 3, score: 0.68, isSatire: false };
+    if (sourceType === 'news' || cleanDomain.includes('news') || cleanDomain.includes('press')) {
+      return { tier: 3, score: 0.80, isSatire: false };
     }
 
     // Default: Tier 4 for unvetted sources

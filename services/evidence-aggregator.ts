@@ -130,13 +130,32 @@ export class EvidenceAggregator {
       });
     }
 
-    // 2. Rank evidence: higher tier, higher reliability score, recent date
+    // 2. Rank evidence:
+    // Live news agencies and accredited fact checkers take priority over static encyclopedic articles (Wikipedia)
     const rankedEvidence = uniqueItems.sort((a, b) => {
+      const isLiveA = a.sourceType === 'news' || a.sourceType === 'factcheck';
+      const isLiveB = b.sourceType === 'news' || b.sourceType === 'factcheck';
+
+      // Always prioritize news agency reports over encyclopedic background
+      if (isLiveA && !isLiveB && b.sourceType === 'wiki') {
+        return -1;
+      }
+      if (isLiveB && !isLiveA && a.sourceType === 'wiki') {
+        return 1;
+      }
+
+      // Active stance (supports / refutes) over neutral mention
+      const activeA = a.stance === 'supports' || a.stance === 'refutes';
+      const activeB = b.stance === 'supports' || b.stance === 'refutes';
+      if (activeA && !activeB) return -1;
+      if (!activeA && activeB) return 1;
+
       // Sort primarily by reliability score
       if (b.reliabilityScore !== a.reliabilityScore) {
         return b.reliabilityScore - a.reliabilityScore;
       }
-      // Sort by date if present
+
+      // Sort by date (most recent first)
       const dateA = a.sourceDate ? new Date(a.sourceDate).getTime() : 0;
       const dateB = b.sourceDate ? new Date(b.sourceDate).getTime() : 0;
       return dateB - dateA;

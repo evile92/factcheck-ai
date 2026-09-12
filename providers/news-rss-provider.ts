@@ -47,15 +47,17 @@ export class NewsRssProvider implements IProvider {
 
       const xmlText = await res.text();
       const $ = cheerio.load(xmlText, { xmlMode: true });
-      const items = $('item').slice(0, 5).toArray();
+      const items = $('item').slice(0, 10).toArray();
       const evidence: EvidenceItem[] = [];
 
       for (const el of items) {
         const item = $(el);
-        const title = cleanText(item.find('title').text());
+        const rawTitle = cleanText(item.find('title').text());
         const link = item.find('link').text() || item.find('guid').text();
         const pubDateStr = item.find('pubDate').text();
-        const sourceName = item.find('source').text() || 'Google News Source';
+        const sourceEl = item.find('source');
+        const sourceName = cleanText(sourceEl.text()) || 'وكالة إخبارية';
+        const sourceUrlAttr = sourceEl.attr('url') || '';
         const description = cleanText(item.find('description').text());
 
         let isoDate: string | undefined;
@@ -67,26 +69,40 @@ export class NewsRssProvider implements IProvider {
           // ignore date parse error
         }
 
+        // Extract true publisher domain from source attribute
         let domain = 'news.google.com';
-        try {
-          if (link.startsWith('http')) {
-            domain = new URL(link).hostname;
-          }
-        } catch {}
+        if (sourceUrlAttr) {
+          try {
+            domain = new URL(sourceUrlAttr).hostname.replace(/^www\./, '');
+          } catch {}
+        } else if (link.startsWith('http')) {
+          try {
+            const parsed = new URL(link).hostname.replace(/^www\./, '');
+            if (!parsed.includes('google.com')) {
+              domain = parsed;
+            }
+          } catch {}
+        }
+
+        // Clean trailing " - SourceName" from Google News titles
+        let cleanTitle = rawTitle;
+        if (sourceName && cleanTitle.endsWith(sourceName)) {
+          cleanTitle = cleanTitle.replace(new RegExp(`\\s*-\\s*${sourceName}$`), '').trim();
+        }
 
         evidence.push({
           id: `news-rss-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           sourceUrl: link,
-          sourceTitle: `${sourceName}: ${title}`,
+          sourceTitle: `${sourceName}: ${cleanTitle}`,
           sourceDomain: domain,
           sourceDate: isoDate,
-          sourceSnippet: description || title,
+          sourceSnippet: description || cleanTitle,
           retrievedAt: new Date().toISOString(),
           sourceType: 'news',
-          reliabilityScore: 0.75,
-          tier: 3,
+          reliabilityScore: 0.85,
+          tier: 2,
           stance: 'mentions',
-          claimedAspect: title,
+          claimedAspect: cleanTitle,
         });
       }
 

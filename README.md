@@ -1,64 +1,121 @@
-# FactCheck AI — تحقق قبل أن تصدق 🔍
+# FactCheck Desk (FactCheck AI) 🔍
 
-> **منظومة ذكاء اصطناعي متعددة الوسائط للتحقق الفوري من الأخبار والنصوص والصور والفيديوهات عبر استرجاع الأدلة الموثقة ومنع الاختلاق.**
+> **Production-grade multimodal fact-checking & news verification platform with real-time cross-lingual evidence retrieval and zero-hallucination guarantee.**
 
----
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Netlify-00C7B7?style=for-the-badge&logo=netlify&logoColor=white)](https://factcheck-desk.netlify.app)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Vitest](https://img.shields.io/badge/Tests-25%20Passed-brightgreen?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
 
-## 🌟 نبذة عن المشروع
-**FactCheck AI** هو تطبيق ويب إنتاجي فائق السرعة، صُمم خصيصاً للتحقق من صحة الأخبار والشائعات والمنشورات والصور والفيديوهات المتداولة على شبكة الإنترنت ومنصات التواصل الاجتماعي.
-
-يعتمد النظام على منهجية **Evidence-First** الصارمة، بحيث **لا يتم اختلاق أي مصدر أو رابط أو معلومة**، بل يسترجع الأدلة الحقيقية من كبرى قواعد البيانات والمصادر الدولية ووكالات التحقق المعتمدة، ثم يقيّم موثوقية كل مصدر عبر نظام تصنيف خماسي المستويات (5-Tier Reliability Engine) لإصدار حكم موضوعي مع نسبة ثقة مدعومة بروابط المصادر الأصلية.
-
----
-
-## ⚡ المزايا والقدرات الرئيسية
-
-### 1. تعدد وسائط الإدخال (Multimodal Ingestion)
-- **نص أو منشور:** استخراج الادعاءات وتصنيفها ضمن 15 مجالاً (سياسي، طبي، علمي، اقتصادي، رياضي...).
-- **رابط مقال أو خبر:** جلب المحتوى وفحصه مع نظام حماية صارم ضد هجمات SSRF.
-- **روابط التواصل الاجتماعي:** دعم YouTube, X, Facebook, Instagram عبر بيانات OpenGraph الرسمية.
-- **الصور ولقطات الشاشة (Screenshots):** استخراج النصوص الكامنة عبر التعرف الضوئي على الحروف (OCR) متعدد اللغات، فحص بيانات الكاميرا الوصفية (EXIF)، وتحليل التلاعب الرقمي (ELA) ومؤشرات التوليد بالذكاء الاصطناعي مع إخلاء مسؤولية احتمالي.
-- **الفيديوهات:** بناء مخطط زمني للمشاهد (00:00, 00:05, 00:10...)، وفحص نصوص الإطارات وتفريغ الصوت.
-- **التحقق من الحافظة (1-Click Clipboard):** زر ذكي يقرأ الحافظة مباشرة ويفحص النص أو الصورة أو الرابط فوراً.
-- **السحب والإفلات (Drag & Drop):** رفع سلس للوسائط مع فحص آمن لحجم الملف ونوعه.
-
-### 2. محركات البحث وقواعد البيانات المجانية (Multi-Provider Architecture)
-- **Google Fact Check Tools API:** مطابقة الادعاءات مع تقارير وكالات التحقق العالمية المعتمدة وفق معيار ClaimReview.
-- **Wikipedia / Wikidata Knowledge Base:** تدقيق التواريخ الحيوية، والأحداث التاريخية، والكيانات السياسية والعلمية عبر واجهة REST الرسمية المجانية.
-- **GDELT Project Database:** قاعدة بيانات الأحداث واللغات العالمية (أضخم مستودع مجاني للأخبار العالمية الآنية).
-- **Google News Live RSS:** رصد التغطيات الإخبارية الفورية ومتعددة اللغات (العربية، الإنجليزية، إلخ).
-- **DuckDuckGo Instant Knowledge API:** استرجاع الملخصات المعرفية الموثقة.
-- **CrossRef Scholarly Registry:** تدقيق الادعاءات الطبية والعلمية بمراجعة أوراق البحث المحكمة ومراجع الـ DOI.
-
-### 3. الأحكام الصادرة (Verdicts)
-- 🟢 **TRUE** (صحيح ومؤكد)
-- 🔴 **FALSE** (كاذب / غير صحيح)
-- 🟠 **MISLEADING** (مضلل / سياق قديم معاد تدويره)
-- 🟡 **PARTLY TRUE** (صحيح جزئياً / متباين)
-- ⚪ **UNVERIFIED** (غير مؤكد — لا توجد أدلة كافية للحكم دون تخمين)
-
-### 4. ميزات إضافية نوعية
-- **كشف إعادة التدوير والسياق الخاطئ (Context Recycling / First Seen):** كشف الصور ومقاطع الفيديو الحقيقية التي تعود لسنوات سابقة (مثل 2019) ويُعاد نشرها اليوم كحدث عاجل.
-- **اكتشاف التناقض بين المصادر:** مقارنة تلقائية عند تباين المصادر وإبراز أيها أحدث وأعلى تصنيفاً.
-- **وضع المقارنة ("قارن مصدرين"):** مقارنة روايتين مختلفتين وتحديد نقاط الاتفاق والاختلاف وأيهما يملك دليلاً أقوى.
-- **بطاقة المشاركة ونسخ التقرير:** توليد بطاقة أنيقة لمشاركتها عبر منصات التواصل ونسخ تقرير نصي بنقرة زر.
-- **لوحة مراقبة المزودات (Provider Health Monitor):** مراقبة حية لسرعة استجابة المزودات وحالة الذاكرة المؤقتة (Cache).
+🌐 **Live Website:** [https://factcheck-desk.netlify.app](https://factcheck-desk.netlify.app)
 
 ---
 
-## 🚀 البدء السريع والتثبيت
+## 🌟 Overview
 
-راجع ملف [SETUP.md](./SETUP.md) لتعليمات التثبيت خطوة بخطوة.
+**FactCheck Desk** is an investigative-grade web application engineered to verify breaking news, rumors, social posts, articles, photos, and video clips across international and local media.
+
+Adhering to a strict **Evidence-First** doctrine, the platform **never invents or hallucinates any source, quotation, or link**. Instead, it queries primary archives, accredited fact-checkers, encyclopedias, and global wire feeds, evaluating every retrieved record through a **5-Tier Reliability Engine** to deliver an objective verdict with a verifiable confidence index and outbound citations.
+
+---
+
+## ⚡ Key Capabilities
+
+### 1. Multimodal Content Ingestion
+- **Text & Claims:** Extracts discrete assertions and categorizes them across 15 domains (Political, Medical, Scientific, Disaster, Economic, Satire, etc.).
+- **Articles & Web URLs:** Crawls and parses target articles with robust SSRF protection blocking private IPs, loopback, and metadata endpoints.
+- **Social Media Links:** Inspects YouTube, X (Twitter), Facebook, and Instagram via structured OpenGraph metadata.
+- **Images & Screenshots:** Multilingual Optical Character Recognition (OCR), EXIF camera metadata extraction, and digital manipulation / AI-generation likelihood indicators with objective disclaimers.
+- **Videos:** Keyframe scene sampling timeline (`00:00`, `00:05`, `00:10`...), frame OCR, and audio transcript inspection.
+- **1-Click Clipboard:** Instantly reads and ingests text, URLs, or images directly from system clipboard with zero manual formatting.
+
+### 2. Concurrent Bilingual & Cross-Lingual Retrieval
+- **Dual-Language Search:** Searches **both Arabic and English sources simultaneously** regardless of input language:
+  - If a claim is in **Arabic**, it queries Arabic news outlets while concurrently translating entities to query global English wire services (Reuters, AP, BBC, Snopes, PolitiFact).
+  - If a claim is in **English**, it queries global wires while concurrently searching Arabic archives and news desks.
+- **Smart Translation & Fallback Dictionary:** Built-in translation pipeline backed by an extensive journalistic domain dictionary for high-speed offline resilience.
+
+### 3. Multi-Provider Architecture (Zero Required API Keys)
+- **Google Fact Check Tools API:** Matches claims with accredited global fact-checkers adhering to the `ClaimReview` schema.
+- **Wikipedia / Wikimedia REST API:** Queries official encyclopedic articles, biographical data, and historical milestones.
+- **GDELT Project Global Database:** Connects to the world's largest open real-time archive of global media and events.
+- **Google News Live RSS:** Streams real-time multilingual news coverage across world regions.
+- **DuckDuckGo Instant Knowledge API:** Retrieves validated knowledge graph summaries and entities.
+- **CrossRef Scholarly Registry:** Verifies medical and scientific assertions against peer-reviewed DOI research publications.
+
+### 4. Objective Verdict Categories
+- 🟢 **TRUE** — Verifiably confirmed by corroborating primary sources and global wires.
+- 🔴 **FALSE** — Conclusively debunked or refuted by credible documentation.
+- 🟠 **MISLEADING** — Out of context, distorted caption, or recycled historical event.
+- 🟡 **PARTLY TRUE** — Contains factual elements mixed with inaccuracies or exaggerations.
+- ⚪ **UNVERIFIED** — Insufficient independent documentation to rule decisively without guessing.
+
+### 5. Advanced Editorial & Forensic Tools
+- **Context Recycling & First-Seen Detection:** Identifies genuine old footage (e.g. from 2019) recirculated as breaking news.
+- **Contradiction Alert:** Highlights conflicting coverage between outlets with side-by-side comparative analysis.
+- **Cross-Source Comparison ("Compare Two Accounts"):** Contrasts two opposing reports to isolate points of agreement, divergence, and evidence weight.
+- **Dossier Sharing & 1-Click Copy:** Generates structured fact-check briefing text and visual cards ready for distribution.
+- **Provider Health Monitor:** Live latency, uptime, and cache metrics for all integrated databases.
+
+---
+
+## 🛠 Tech Stack
+
+- **Framework:** [Next.js 15](https://nextjs.org/) (App Router, Server Actions, Dynamic Streaming SSE)
+- **Runtime & UI:** React 19, TypeScript
+- **Styling:** [Tailwind CSS v4](https://tailwindcss.com/) with custom editorial themes & Dark/Light mode
+- **Forensics & Extraction:** Cheerio, WebAssembly Tesseract OCR, EXIF Parser
+- **Testing:** [Vitest](https://vitest.dev/) (25 unit and integration tests passing)
+- **Deployment:** [Netlify](https://factcheck-desk.netlify.app) (Serverless & Edge functions)
+
+---
+
+## 🚀 Quick Start & Local Development
+
+### Prerequisites
+- Node.js 18.x or newer
+- npm or pnpm
+
+### Installation
 
 ```bash
-# تثبيت الحزم
+# Clone repository
+git clone https://github.com/evile92/factcheck-ai.git
+cd factcheck-ai
+
+# Install dependencies
 npm install
 
-# تشغيل خادم التطوير
+# Start development server
 npm run dev
+```
 
-# تشغيل الاختبارات المؤتمتة
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Running Tests
+
+```bash
+# Run the automated test suite (25 tests)
 npm test
 ```
 
-افتح المتصفح على: `http://localhost:3000`
+### Production Build
+
+```bash
+# Compile and build optimized production bundle
+npm run build
+```
+
+---
+
+## 🌐 Live Deployment
+
+The application is deployed and running live on **Netlify**:
+👉 **[https://factcheck-desk.netlify.app](https://factcheck-desk.netlify.app)**
+
+---
+
+## 📄 License & Standards
+
+Independent and open editorial verification initiative. Adheres to international journalistic standards for evidence verification, source transparency, and anti-hallucination protocols.

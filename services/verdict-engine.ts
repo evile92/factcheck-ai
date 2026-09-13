@@ -75,6 +75,9 @@ export class VerdictEngine {
     let refuteWeight = 0;
     let neutralWeight = 0;
 
+    const supportingItems = evidence.filter((e) => e.stance === 'supports');
+    const refutingItems = evidence.filter((e) => e.stance === 'refutes');
+
     for (const item of evidence) {
       const weight = item.reliabilityScore;
       if (item.stance === 'supports') {
@@ -105,7 +108,28 @@ export class VerdictEngine {
       };
     }
 
-    // Check if strong support exists
+    // Identify major international wires, primary official sources, and mainstream news
+    const majorWiresSupporting = supportingItems.filter(
+      (e) =>
+        (e.tier === 1 || e.tier === 2) &&
+        (e.sourceType === 'wire' || e.sourceType === 'news' || e.sourceType === 'official' || e.sourceType === 'factcheck')
+    );
+    const reputableNewsSupporting = supportingItems.filter((e) => e.tier <= 3);
+
+    // Case 1: Wire Consensus - Multiple independent major wires or accredited news confirming without refutation
+    if (refuteWeight === 0 && (majorWiresSupporting.length >= 2 || (reputableNewsSupporting.length >= 2 && supportWeight >= 1.4))) {
+      const conf = Math.min(96, Math.max(85, Math.round((supportWeight / (supportWeight + 0.15)) * 100)));
+      return {
+        verdict: 'TRUE',
+        verdictLabelAr: 'صحيح ومؤكد — إجماع إخباري موثق',
+        verdictLabelEn: 'VERIFIED TRUE',
+        confidence: conf,
+        confidenceDisclaimer: disclaimer,
+        summary: 'تم تأكيد هذا الادعاء عبر إجماع وتغطية متطابقة من وكالات أنباء ومصادر إخبارية دولية معتمدة.',
+      };
+    }
+
+    // Case 2: Strong general support (even if minor refute exists but support heavily dominates)
     if (supportWeight > 1.5 && supportWeight > refuteWeight * 2) {
       const conf = Math.min(95, Math.max(70, Math.round((supportWeight / (supportWeight + refuteWeight || 1)) * 100)));
       return {
@@ -115,6 +139,19 @@ export class VerdictEngine {
         confidence: conf,
         confidenceDisclaimer: disclaimer,
         summary: `تم تأكيد هذا الادعاء عبر مصادر رسمية وتقارير إخبارية مستقلة وموثقة.`,
+      };
+    }
+
+    // Case 3: Single major reputable wire / official source without refutation
+    if (refuteWeight === 0 && supportWeight >= 0.8 && reputableNewsSupporting.length >= 1) {
+      const conf = Math.min(88, Math.max(72, Math.round((supportWeight / (supportWeight + 0.35)) * 100)));
+      return {
+        verdict: 'TRUE',
+        verdictLabelAr: 'صحيح — تقارير إخبارية معتمدة',
+        verdictLabelEn: 'VERIFIED TRUE',
+        confidence: conf,
+        confidenceDisclaimer: disclaimer,
+        summary: 'الخبر مؤكد استناداً إلى تقارير موثوقة من وكالات الأنباء المعتمدة مع غياب أي نفي رسمي.',
       };
     }
 

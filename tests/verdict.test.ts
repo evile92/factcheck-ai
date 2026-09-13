@@ -102,4 +102,63 @@ describe('Verdict Engine & Anti-Hallucination Decision Logic', () => {
     const verdict = engine.evaluate([dummyClaim], evidence, [], undefined, recycledContext);
     expect(verdict.verdict).toBe('MISLEADING');
   });
+
+  it('outputs TRUE with high confidence when multiple major news wires corroborate the event (Wire Consensus)', () => {
+    const wireConsensusEvidence: EvidenceItem[] = [
+      {
+        id: 'ev1',
+        sourceUrl: 'https://reuters.com/world/article1',
+        sourceTitle: 'Trump says Iran probably responsible for attack on Saudi pipeline',
+        sourceDomain: 'reuters.com',
+        sourceSnippet: 'President Trump stated that Iran was likely behind the recent attack on Saudi oil infrastructure.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'wire',
+        reliabilityScore: 0.88,
+        tier: 2,
+        stance: 'supports',
+        claimedAspect: 'تصريح ترامب',
+      },
+      {
+        id: 'ev2',
+        sourceUrl: 'https://bbc.com/arabic/world-news-1',
+        sourceTitle: 'ترامب يرجّح وقوف إيران خلف استهداف السعودية',
+        sourceDomain: 'bbc.com',
+        sourceSnippet: 'صرح الرئيس الأمريكي أن بلاده ترجح تورط إيران في الهجمات الأخيرة.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.88,
+        tier: 2,
+        stance: 'supports',
+        claimedAspect: 'تصريح ترامب',
+      },
+    ];
+
+    const verdict = engine.evaluate([dummyClaim], wireConsensusEvidence);
+    expect(verdict.verdict).toBe('TRUE');
+    expect(verdict.confidence).toBeGreaterThanOrEqual(85);
+    expect(verdict.verdictLabelAr).toContain('إجماع إخباري');
+  });
+
+  it('outputs TRUE when a single Tier 2 wire corroborates the event with zero refutations', () => {
+    const singleWireEvidence: EvidenceItem[] = [
+      {
+        id: 'ev1',
+        sourceUrl: 'https://reuters.com/world/article2',
+        sourceTitle: 'Reuters report confirming event',
+        sourceDomain: 'reuters.com',
+        sourceSnippet: 'Exclusive report with confirmed documentation.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'wire',
+        reliabilityScore: 0.88,
+        tier: 2,
+        stance: 'supports',
+        claimedAspect: 'خبر حصري',
+      },
+    ];
+
+    const verdict = engine.evaluate([dummyClaim], singleWireEvidence);
+    expect(verdict.verdict).toBe('TRUE');
+    expect(verdict.confidence).toBeGreaterThanOrEqual(72);
+  });
 });
+

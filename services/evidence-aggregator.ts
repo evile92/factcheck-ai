@@ -1,6 +1,7 @@
 import { ContradictionItem, EvidenceItem, ExtractedClaim } from '@/types';
 import { globalReliabilityEngine } from './reliability-engine';
-import { calculateSimilarity } from '@/lib/text-utils';
+import { calculateSimilarity, tokenize } from '@/lib/text-utils';
+import { generateCrossLingualQueries } from '@/lib/language';
 
 export class EvidenceAggregator {
   /**
@@ -31,6 +32,32 @@ export class EvidenceAggregator {
       const domain = item.sourceDomain || new URL(item.sourceUrl).hostname;
       const { tier, score } = globalReliabilityEngine.evaluateSource(domain, item.sourceType);
 
+      // Compute semantic alignment with claims (including cross-lingual queries)
+      let maxSimWithClaims = 0;
+      let maxTokenRatio = 0;
+      const evTokens = tokenize(item.sourceTitle + ' ' + item.sourceSnippet + ' ' + (item.claimedAspect || ''));
+
+      for (const claim of claims) {
+        const candidateTexts = [
+          claim.text,
+          ...(claim.searchQueries || []),
+          ...generateCrossLingualQueries(claim.text, claim.language || 'ar'),
+        ];
+
+        for (const cand of candidateTexts) {
+          const candTokens = tokenize(cand);
+          let overlap = 0;
+          for (const tok of candTokens) {
+            if (evTokens.has(tok)) overlap++;
+          }
+          const tokenRatio = candTokens.size > 0 ? overlap / candTokens.size : 0;
+          const sim = calculateSimilarity(cand, item.sourceTitle + ' ' + item.sourceSnippet);
+
+          if (tokenRatio > maxTokenRatio) maxTokenRatio = tokenRatio;
+          if (sim > maxSimWithClaims) maxSimWithClaims = sim;
+        }
+      }
+
       // Determine stance based on snippet content relative to claims
       let computedStance = item.stance;
       if (computedStance === 'mentions') {
@@ -45,9 +72,11 @@ export class EvidenceAggregator {
           'شائعات',
           'تنفي',
           'ينفي',
+          'نفت',
           'نفي',
           'لا صحة',
           'مزاعم',
+          'مزعوم',
           'ادعاءات',
           'تكذيب',
           'تفنيد',
@@ -55,10 +84,21 @@ export class EvidenceAggregator {
           'حياً يرزق',
           'على قيد الحياة',
           'تراجع عن',
+          'لا أساس له',
+          'عار عن الصحة',
+          'عاري عن الصحة',
+          'فبركة',
+          'تضليل',
+          'مضلل',
+          'سياق مضلل',
+          'صورة قديمة',
+          'فيديو قديم',
+          'تحريف',
           'false',
           'fake',
           'hoax',
           'debunk',
+          'debunked',
           'denies',
           'denied',
           'refutes',
@@ -68,17 +108,50 @@ export class EvidenceAggregator {
           'unfounded',
           'dismisses',
           'claims are false',
+          'baseless',
+          'fabricated',
+          'misleading',
+          'out of context',
+          'doctored',
+          'manipulated',
+          'no evidence',
         ];
 
-        // 2. Corroboration / Confirmation patterns
+        // 2. Corroboration / Confirmation / Declarative Reporting patterns
         const confirmationPatterns = [
+          // Arabic official, declarative & reporting verbs
           'أكدت',
           'أكد',
+          'تأكيد',
           'صحيح',
           'رسمياً',
           'بيان رسمي',
+          'إعلان رسمي',
+          'وثائق تؤكد',
+          'يعلن',
+          'تعلن',
           'أعلن',
           'أعلنت',
+          'إعلان',
+          'صرح',
+          'صرحت',
+          'قال',
+          'قالت',
+          'أفاد',
+          'أفادت',
+          'أوضح',
+          'أوضحت',
+          'كشف',
+          'كشفت',
+          'نقل عن',
+          'نقلت',
+          'يرجح',
+          'رجح',
+          'رجحت',
+          'يحمل',
+          'حملت',
+          'وقوف',
+          'مسؤولية',
           'مقتل',
           'وفاة',
           'اغتيال',
@@ -88,17 +161,82 @@ export class EvidenceAggregator {
           'تأكيد مقتل',
           'لقي حتفه',
           'رحيل',
-          'إعلان رسمي',
-          'وثائق تؤكد',
-          'يعلن',
-          'تعلن',
+          'إصابة',
+          'إصابات',
+          'استهداف',
+          'هجوم',
+          'قصف',
+          'ضربة',
+          'انفجار',
+          'اعتداء',
+          'توقيع',
+          'اتفاق',
+          'اتفاقية',
+          'استقالة',
+          'استقال',
+          'اعتقال',
+          'اعتقلت',
+          'احتجاز',
+          'محاكمة',
+          'إدانة',
+          'الحكم على',
+          'فوز',
+          'انتصار',
+          'قرار',
+          'إقرار',
+          'مصادقة',
+          // English reporting and attribution verbs
           'confirmed',
+          'confirming',
+          'confirms',
           'verified',
           'official statement',
+          'officially',
+          'announces',
+          'announced',
+          'announcement',
+          'says',
+          'said',
+          'stated',
+          'states',
+          'reports',
+          'reported',
+          'revealed',
+          'reveals',
+          'according to',
+          'likely',
+          'probably',
+          'responsible',
+          'behind',
+          'accuses',
+          'accused',
+          'blames',
+          'blamed',
           'died',
           'killed',
           'assassinated',
+          'assassination',
           'death of',
+          'casualty',
+          'casualties',
+          'injured',
+          'attack',
+          'attacked',
+          'strike',
+          'struck',
+          'targeted',
+          'explosion',
+          'blast',
+          'agreement',
+          'signed',
+          'resigns',
+          'resigned',
+          'arrested',
+          'convicted',
+          'wins',
+          'won',
+          'approved',
+          'passed',
         ];
 
         const hasRefutation = refutationPatterns.some((pattern) => text.includes(pattern));
@@ -107,7 +245,11 @@ export class EvidenceAggregator {
         if (hasRefutation) {
           computedStance = 'refutes';
         } else if (
-          hasConfirmation ||
+          // Condition 1: Direct confirmation / reporting keyword + at least minimal relevance to claims
+          (hasConfirmation && (maxTokenRatio >= 0.2 || maxSimWithClaims >= 0.08 || claims.length === 0)) ||
+          // Condition 2: High semantic match from credible news source (Tier 1-3) reporting on the claim
+          (tier <= 3 && (maxTokenRatio >= 0.35 || maxSimWithClaims >= 0.18)) ||
+          // Condition 3: Wikipedia biographical/historical confirmation
           (item.sourceType === 'wiki' &&
             (text.includes('اغتيال') ||
               text.includes('مقتل') ||
@@ -115,7 +257,8 @@ export class EvidenceAggregator {
               text.includes('assassinated') ||
               text.includes('assassination') ||
               text.includes('killed') ||
-              text.includes('death')))
+              text.includes('death') ||
+              maxTokenRatio >= 0.5))
         ) {
           computedStance = 'supports';
         }
@@ -164,19 +307,37 @@ export class EvidenceAggregator {
     // 3. Map evidence items to claims
     for (const claim of claims) {
       const matchedIds: string[] = [];
-      const { tokenize } = require('@/lib/text-utils');
-      const claimTokens: Set<string> = tokenize(claim.text);
+      const candidateTexts = [
+        claim.text,
+        ...(claim.searchQueries || []),
+        ...generateCrossLingualQueries(claim.text, claim.language || 'ar'),
+      ];
 
       for (const ev of rankedEvidence) {
-        const evTokens: Set<string> = tokenize(ev.sourceTitle + ' ' + ev.sourceSnippet);
-        let overlap = 0;
-        for (const tok of claimTokens) {
-          if (evTokens.has(tok)) overlap++;
-        }
-        const tokenRatio = claimTokens.size > 0 ? overlap / claimTokens.size : 0;
-        const sim = calculateSimilarity(claim.text, ev.sourceTitle + ' ' + ev.sourceSnippet);
+        const evTokens: Set<string> = tokenize(ev.sourceTitle + ' ' + ev.sourceSnippet + ' ' + (ev.claimedAspect || ''));
+        let isMatch = false;
 
-        if (sim > 0.08 || tokenRatio >= 0.4 || ev.claimedAspect.includes(claim.text) || claim.text.includes(ev.claimedAspect)) {
+        for (const cand of candidateTexts) {
+          const candTokens = tokenize(cand);
+          let overlap = 0;
+          for (const tok of candTokens) {
+            if (evTokens.has(tok)) overlap++;
+          }
+          const tokenRatio = candTokens.size > 0 ? overlap / candTokens.size : 0;
+          const sim = calculateSimilarity(cand, ev.sourceTitle + ' ' + ev.sourceSnippet);
+
+          if (
+            sim > 0.08 ||
+            tokenRatio >= 0.35 ||
+            (ev.claimedAspect && cand.includes(ev.claimedAspect)) ||
+            (ev.claimedAspect && ev.claimedAspect.includes(cand))
+          ) {
+            isMatch = true;
+            break;
+          }
+        }
+
+        if (isMatch) {
           matchedIds.push(ev.id);
         }
       }

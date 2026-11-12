@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./public/logo.png" alt="FactCheck Desk Logo" width="240" />
+</p>
+
 # FactCheck Desk (FactCheck AI) 🔍
 
 > **Production-grade multimodal fact-checking & news verification platform with real-time cross-lingual evidence retrieval and zero-hallucination guarantee.**

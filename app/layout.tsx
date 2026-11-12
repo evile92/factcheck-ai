@@ -2,8 +2,20 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'FactCheck AI | مرصد تدقيق الحقائق',
+  metadataBase: new URL('https://factcheck-desk.netlify.app'),
+  title: 'FactCheck Desk | مرصد تدقيق الحقائق',
   description: 'منظومة استقصائية مستقلة للتحقق من صحة الأخبار والنصوص والصور والفيديوهات عبر استرجاع الأدلة الموثقة.',
+  openGraph: {
+    title: 'FactCheck Desk | مرصد تدقيق الحقائق',
+    description: 'منظومة استقصائية مستقلة للتحقق من صحة الأخبار والنصوص والصور والفيديوهات عبر استرجاع الأدلة الموثقة.',
+    images: [{ url: '/logo.png', width: 1024, height: 935, alt: 'FactCheck Desk Logo' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FactCheck Desk | مرصد تدقيق الحقائق',
+    description: 'منظومة استقصائية مستقلة للتحقق من صحة الأخبار والنصوص والصور والفيديوهات عبر استرجاع الأدلة الموثقة.',
+    images: ['/logo.png'],
+  },
 };
 
 export default function RootLayout({

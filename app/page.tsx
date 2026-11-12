@@ -154,6 +154,14 @@ export default function Home() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-10 overflow-hidden">
         {/* Editorial Hero Header */}
         <div className="text-center max-w-3xl mx-auto mb-8 sm:mb-10">
+          <div className="mb-4 flex justify-center">
+            <img
+              src="/logo.png"
+              alt="FactCheck Desk"
+              className="h-24 sm:h-28 w-auto object-contain dark:drop-shadow-[0_0_14px_rgba(255,255,255,0.1)]"
+            />
+          </div>
+
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-slate-300 dark:border-zinc-800 bg-white dark:bg-[#151619] text-slate-700 dark:text-zinc-300 text-[11px] font-semibold uppercase tracking-wider mb-3 shadow-xs">
             <Shield className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
             <span>{lang === 'ar' ? 'تحقيق استقصائي ومطابقة فورية' : 'Investigative Fact Verification'}</span>

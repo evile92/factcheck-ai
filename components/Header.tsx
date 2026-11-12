@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Newspaper, Scale, BookOpen, Activity, Moon, Sun, Globe } from 'lucide-react';
+import { Scale, BookOpen, Activity, Moon, Sun, Globe } from 'lucide-react';
 import { Language, translations } from '@/lib/i18n';
 import { formatDisplayDate } from '@/lib/text-utils';
 
@@ -49,10 +49,12 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Main Masthead Bar */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
         {/* Brand */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-md bg-slate-900 dark:bg-zinc-100 text-white dark:text-slate-950 flex items-center justify-center font-serif font-black text-base sm:text-lg shadow-xs">
-            <Newspaper className="h-4 w-4 sm:h-5 sm:w-5" />
-          </div>
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          <img
+            src="/logo.png"
+            alt="FactCheck Desk"
+            className="h-10 sm:h-12 w-auto object-contain shrink-0 dark:drop-shadow-[0_0_8px_rgba(255,255,255,0.12)]"
+          />
           <div>
             <div className="flex items-baseline gap-1.5">
               <span className="font-serif font-black text-lg sm:text-2xl text-slate-900 dark:text-zinc-50 tracking-tight">

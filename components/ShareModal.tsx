@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Copy, Check, Share2, Newspaper } from 'lucide-react';
+import { X, Copy, Check, Share2 } from 'lucide-react';
 import { VerificationResult } from '@/types';
 import { Language, translations } from '@/lib/i18n';
 import { formatDisplayDate, toWesternDigits } from '@/lib/text-utils';
@@ -58,7 +58,7 @@ ${t.masthead}`;
         <div className="p-4 rounded border border-slate-300 dark:border-zinc-800 bg-slate-50 dark:bg-[#111215] mb-4 text-xs">
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-zinc-800">
             <div className="flex items-center gap-1.5 font-serif font-bold text-slate-900 dark:text-zinc-100">
-              <Newspaper className="h-3.5 w-3.5" />
+              <img src="/logo.png" alt="FactCheck Desk" className="h-6 w-auto object-contain" />
               <span>FACTCHECK DESK</span>
             </div>
             <span className="text-[10px] font-mono text-slate-500">

@@ -8,6 +8,7 @@ import { AcademicProvider } from './academic-provider';
 import { EvidenceItem, ProviderHealth } from '@/types';
 import { providerCache } from '@/lib/cache';
 import { getBilingualQueries } from '@/lib/language';
+import { globalWaybackProvider } from './wayback-provider';
 
 export class ProviderRegistry {
   private providers: IProvider[] = [];
@@ -86,6 +87,12 @@ export class ProviderRegistry {
           (async () => {
             try {
               const res = await provider.search(enQuery, 'en');
+              const stats = this.healthStats.get(provider.name);
+              if (stats) {
+                stats.lastLatency = res.latencyMs;
+                stats.lastChecked = new Date().toISOString();
+                if (!res.success) stats.errorCount++;
+              }
               return res;
             } catch {
               return null;
@@ -109,41 +116,68 @@ export class ProviderRegistry {
   }
 
   /**
-   * Health check monitoring for all registered providers.
+   * Health check monitoring for all registered providers using real concurrent pings (cached 60s).
    */
   async getHealthDashboard(): Promise<ProviderHealth[]> {
-    const healthList: ProviderHealth[] = [];
-
-    for (const provider of this.providers) {
-      const stats = this.healthStats.get(provider.name) || {
-        errorCount: 0,
-        lastLatency: 0,
-        lastChecked: new Date().toISOString(),
-      };
-
-      const configured = provider.isConfigured();
-      let status: 'active' | 'degraded' | 'offline' = 'active';
-
-      if (!configured && provider.name.includes('Google Fact Check')) {
-        status = 'degraded';
-      } else if (stats.errorCount > 3) {
-        status = 'degraded';
-      }
-
-      healthList.push({
-        name: provider.name,
-        category: provider.category,
-        status,
-        latencyMs: stats.lastLatency || 120,
-        lastChecked: stats.lastChecked,
-        freeTier: true,
-        requiresKey: provider.name.includes('Google Fact Check'),
-        hasKey: configured,
-        errorCount: stats.errorCount,
-      });
+    const cachedHealth = providerCache.get('health:dashboard:v2') as ProviderHealth[] | null;
+    if (cachedHealth) {
+      return cachedHealth;
     }
 
-    return healthList;
+    const pingResults: ProviderHealth[] = await Promise.all(
+      this.providers.map(async (provider): Promise<ProviderHealth> => {
+        const stats = this.healthStats.get(provider.name) || {
+          errorCount: 0,
+          lastLatency: 0,
+          lastChecked: new Date().toISOString(),
+        };
+
+        const configured = provider.isConfigured();
+        const pingRes = configured ? await provider.ping().catch(() => ({ active: false, latencyMs: 0 })) : { active: false, latencyMs: 0 };
+
+        let status: 'active' | 'degraded' | 'offline' = 'active';
+        if (!configured && provider.name.includes('Google Fact Check')) {
+          status = 'degraded';
+        } else if (!pingRes.active) {
+          status = 'offline';
+        } else if (stats.errorCount > 3) {
+          status = 'degraded';
+        }
+
+        const nowIso = new Date().toISOString();
+        stats.lastLatency = pingRes.latencyMs || stats.lastLatency;
+        stats.lastChecked = nowIso;
+        this.healthStats.set(provider.name, stats);
+
+        return {
+          name: provider.name,
+          category: provider.category,
+          status,
+          latencyMs: pingRes.latencyMs || stats.lastLatency || 0,
+          lastChecked: nowIso,
+          freeTier: true,
+          requiresKey: provider.name.includes('Google Fact Check'),
+          hasKey: configured,
+          errorCount: stats.errorCount,
+        } satisfies ProviderHealth;
+      })
+    );
+
+    const wbPing = await globalWaybackProvider.ping().catch(() => ({ active: false, latencyMs: 0 }));
+    pingResults.push({
+      name: globalWaybackProvider.name,
+      category: 'media',
+      status: wbPing.active ? 'active' : 'offline',
+      latencyMs: wbPing.latencyMs,
+      lastChecked: new Date().toISOString(),
+      freeTier: true,
+      requiresKey: false,
+      hasKey: true,
+      errorCount: 0,
+    });
+
+    providerCache.set('health:dashboard:v2', pingResults, 60);
+    return pingResults;
   }
 }
 

@@ -98,6 +98,13 @@ export const MediaAnalysisView: React.FC<MediaAnalysisViewProps> = ({ imageAnaly
             <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug">
               {imageAnalysis.aiProbabilityDisclaimer}
             </p>
+            {imageAnalysis.manipulationIndicators.length > 0 && (
+              <ul className="mt-2 pt-2 border-t border-slate-200 dark:border-zinc-800 space-y-1 text-[11px] text-slate-600 dark:text-zinc-300 list-disc list-inside">
+                {imageAnalysis.manipulationIndicators.map((ind, i) => (
+                  <li key={i}>{ind}</li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       )}
@@ -120,6 +127,13 @@ export const MediaAnalysisView: React.FC<MediaAnalysisViewProps> = ({ imageAnaly
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
             {videoAnalysis.timeline.map((frame, idx) => (
               <div key={idx} className="p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded text-xs">
+                {frame.thumbnailUrl && (
+                  <img
+                    src={frame.thumbnailUrl}
+                    alt={`Frame ${toWesternDigits(idx + 1)}`}
+                    className="w-full h-24 object-cover rounded border border-slate-200 dark:border-zinc-800 mb-2"
+                  />
+                )}
                 <div className="flex items-center justify-between mb-1 text-slate-600 dark:text-zinc-400 font-mono text-[11px]">
                   <span>{toWesternDigits(frame.timestamp)}</span>
                   <span>Frame #{toWesternDigits(idx + 1)}</span>

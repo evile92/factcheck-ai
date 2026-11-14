@@ -30,9 +30,9 @@ export class VerdictEngine {
     const disclaimer =
       'نسبة الثقة تعكس درجة توافق الأدلة المسترجعة وموثوقية المصادر في هذه اللحظة، وليست حقيقة مطلقة.';
 
-    // Check if satire
+    // Check if satire (claim category or Tier 5 satire/disreputable domain)
     const isSatireClaim = claims.some((c) => c.category === 'سخرية / Satire');
-    const hasSatireSource = evidence.some((e) => e.tier === 5 && e.sourceDomain.includes('onion'));
+    const hasSatireSource = evidence.some((e) => e.tier === 5);
 
     if (isSatireClaim || hasSatireSource) {
       return {
@@ -89,14 +89,18 @@ export class VerdictEngine {
       }
     }
 
-    const totalWeight = supportWeight + refuteWeight + neutralWeight;
-
-    // Check if fact-checkers specifically refuted it
+    // Check if fact-checkers specifically refuted it, or authoritative Tier 1-2 sources refute without counter-evidence
     const factCheckRefutes = evidence.some(
       (e) => e.sourceType === 'factcheck' && (e.stance === 'refutes' || e.sourceSnippet.toLowerCase().includes('كاذب'))
     );
+    const strongSingleRefutation =
+      refuteWeight >= 0.8 && supportWeight === 0 && refutingItems.some((e) => e.tier <= 2);
 
-    if (factCheckRefutes || (refuteWeight > supportWeight && refuteWeight > 1.2)) {
+    if (
+      factCheckRefutes ||
+      strongSingleRefutation ||
+      (refuteWeight > supportWeight * 1.35 && refuteWeight > 1.2)
+    ) {
       const conf = Math.min(96, Math.max(70, Math.round((refuteWeight / (refuteWeight + supportWeight || 1)) * 100)));
       return {
         verdict: 'FALSE',
@@ -104,7 +108,24 @@ export class VerdictEngine {
         verdictLabelEn: 'FALSE',
         confidence: conf,
         confidenceDisclaimer: disclaimer,
-        summary: `تؤكد التحقيقات وتقارير التحقق المسترجعة عدم صحة هذا الادعاء مع نفي رسمي من مصادر موثوقة.`,
+        summary: `تؤكد التحقيقات وتقارير التحقق المسترجعة عدم صحة هذا الادعاء أو تعارضه المباشر مع المصادر الموثوقة.`,
+      };
+    }
+
+    // Contested / Partly True when substantial credible sources both support and refute
+    if (
+      supportWeight >= 0.75 &&
+      refuteWeight >= 0.75 &&
+      Math.abs(supportWeight - refuteWeight) <= Math.max(supportWeight, refuteWeight) * 0.5
+    ) {
+      return {
+        verdict: 'PARTLY_TRUE',
+        verdictLabelAr: 'صحيح جزئياً / متباين',
+        verdictLabelEn: 'PARTLY TRUE',
+        confidence: 65,
+        confidenceDisclaimer: disclaimer,
+        summary:
+          'هناك عناصر صحيحة في الخبر، لكن التفاصيل تتضمن تبايناً أو مبالغات بين المصادر المسترجعة حول دقة الأرقام أو السياق.',
       };
     }
 
@@ -155,13 +176,13 @@ export class VerdictEngine {
       };
     }
 
-    // Check if partly true or misleading
-    if (supportWeight > 0.8 && refuteWeight > 0.8) {
+    // Fallback check for contested mixed evidence
+    if (supportWeight > 0.7 && refuteWeight > 0.7) {
       return {
         verdict: 'PARTLY_TRUE',
         verdictLabelAr: 'صحيح جزئياً / متباين',
         verdictLabelEn: 'PARTLY TRUE',
-        confidence: 65,
+        confidence: 62,
         confidenceDisclaimer: disclaimer,
         summary:
           'هناك عناصر صحيحة في الخبر، لكن التفاصيل تتضمن مبالغات أو تباين في أرقام وتفسيرات المصادر المختلفة.',

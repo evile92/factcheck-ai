@@ -1,6 +1,6 @@
 import { IProvider, ProviderResponse } from './base-provider';
 import { EvidenceItem } from '@/types';
-import { cleanText } from '@/lib/text-utils';
+import { cleanText, extractKeyTerms } from '@/lib/text-utils';
 
 export class OpenSearchProvider implements IProvider {
   name = 'DuckDuckGo Instant Knowledge API';
@@ -25,7 +25,8 @@ export class OpenSearchProvider implements IProvider {
   async search(query: string): Promise<ProviderResponse> {
     const start = Date.now();
     try {
-      const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+      const concise = query.trim().length > 50 ? extractKeyTerms(query, 4).join(' ') || query : query;
+      const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(concise)}&format=json&no_html=1&skip_disambig=1`;
 
       const res = await fetch(url, {
         headers: { 'User-Agent': 'FactCheckAI/1.0' },

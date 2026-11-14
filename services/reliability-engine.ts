@@ -25,6 +25,7 @@ const TIER_2_DOMAINS = new Set([
   'apnews.com',
   'ap.org',
   'afp.com',
+  'factcheck.afp.com',
   'bloomberg.com',
   'bbc.com',
   'bbc.co.uk',
@@ -43,9 +44,10 @@ const TIER_2_DOMAINS = new Set([
   'dabegat.org',
   'misbar.com',
   'tahayyaz.net',
+  'verify-sy.com',
+  'matsda2sh.com',
+  'kashif.ps',
   'wikipedia.org',
-  'ar.wikipedia.org',
-  'en.wikipedia.org',
 ]);
 
 const TIER_3_DOMAINS = new Set([
@@ -88,43 +90,75 @@ const SATIRE_AND_TIER_5_DOMAINS = new Set([
   'newspunch.com',
 ]);
 
+const SOCIAL_AND_UGC_DOMAINS = new Set([
+  'twitter.com',
+  'x.com',
+  'facebook.com',
+  'fb.com',
+  'instagram.com',
+  'tiktok.com',
+  'youtube.com',
+  'youtu.be',
+  't.me',
+  'telegram.me',
+  'reddit.com',
+  'blogspot.com',
+  'wordpress.com',
+  'medium.com',
+]);
+
+function matchesDomainSet(domain: string, domainSet: Set<string>): boolean {
+  if (domainSet.has(domain)) return true;
+  for (const entry of domainSet) {
+    if (domain.endsWith('.' + entry)) return true;
+  }
+  return false;
+}
+
 export class SourceReliabilityEngine {
   /**
    * Evaluates domain credibility and assigns a tier (1 to 5) and base score (0.0 to 1.0).
    */
   evaluateSource(domain: string, sourceType?: string): { tier: SourceTier; score: number; isSatire: boolean } {
-    const cleanDomain = domain.toLowerCase().replace(/^www\./, '');
+    const cleanDomain = domain.toLowerCase().replace(/^www\./, '').trim();
 
-    // Satire check
-    if (SATIRE_AND_TIER_5_DOMAINS.has(cleanDomain)) {
+    // Satire check (highest precedence)
+    if (matchesDomainSet(cleanDomain, SATIRE_AND_TIER_5_DOMAINS)) {
       return { tier: 5, score: 0.15, isSatire: true };
+    }
+
+    // Social Media / User Generated Content (not independently vetted)
+    if (sourceType === 'social' || matchesDomainSet(cleanDomain, SOCIAL_AND_UGC_DOMAINS)) {
+      return { tier: 4, score: 0.35, isSatire: false };
     }
 
     // Tier 1: Government, Academic, Official Organizations
     if (
-      TIER_1_DOMAINS.has(cleanDomain) ||
+      matchesDomainSet(cleanDomain, TIER_1_DOMAINS) ||
       cleanDomain.endsWith('.gov') ||
       cleanDomain.endsWith('.edu') ||
       cleanDomain.endsWith('.ac.uk') ||
       cleanDomain.endsWith('.gov.ae') ||
       cleanDomain.endsWith('.gov.sa') ||
-      cleanDomain.endsWith('.gov.eg')
+      cleanDomain.endsWith('.gov.eg') ||
+      cleanDomain.endsWith('.gov.jo') ||
+      cleanDomain.endsWith('.gov.qa')
     ) {
       return { tier: 1, score: 0.95, isSatire: false };
     }
 
     // Wikipedia: Curated encyclopedia reference (scored below live wire services)
-    if (cleanDomain.includes('wikipedia') || sourceType === 'wiki') {
+    if (cleanDomain === 'wikipedia.org' || cleanDomain.endsWith('.wikipedia.org') || sourceType === 'wiki') {
       return { tier: 2, score: 0.78, isSatire: false };
     }
 
     // Tier 2: Primary wire services and accredited fact-checkers (highest priority for news)
-    if (TIER_2_DOMAINS.has(cleanDomain) || cleanDomain.includes('factcheck')) {
+    if (matchesDomainSet(cleanDomain, TIER_2_DOMAINS) || cleanDomain.includes('factcheck')) {
       return { tier: 2, score: 0.93, isSatire: false };
     }
 
     // Tier 3: Mainstream news outlets
-    if (TIER_3_DOMAINS.has(cleanDomain)) {
+    if (matchesDomainSet(cleanDomain, TIER_3_DOMAINS)) {
       return { tier: 3, score: 0.85, isSatire: false };
     }
 
@@ -136,7 +170,7 @@ export class SourceReliabilityEngine {
       return { tier: 2, score: 0.88, isSatire: false };
     }
     if (sourceType === 'news' || cleanDomain.includes('news') || cleanDomain.includes('press')) {
-      return { tier: 3, score: 0.80, isSatire: false };
+      return { tier: 3, score: 0.78, isSatire: false };
     }
 
     // Default: Tier 4 for unvetted sources

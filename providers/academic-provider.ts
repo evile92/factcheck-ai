@@ -1,6 +1,6 @@
 import { IProvider, ProviderResponse } from './base-provider';
 import { EvidenceItem } from '@/types';
-import { cleanText } from '@/lib/text-utils';
+import { cleanText, extractKeyTerms } from '@/lib/text-utils';
 
 export class AcademicProvider implements IProvider {
   name = 'CrossRef Scholarly & Scientific Registry';
@@ -25,9 +25,10 @@ export class AcademicProvider implements IProvider {
   async search(query: string): Promise<ProviderResponse> {
     const start = Date.now();
     try {
+      const conciseQuery = extractKeyTerms(query, 6).join(' ') || query;
       // Query CrossRef works endpoint
       const url = `https://api.crossref.org/works?query=${encodeURIComponent(
-        query
+        conciseQuery
       )}&rows=3&mailto=contact@factcheck.ai`;
 
       const res = await fetch(url, {
@@ -56,6 +57,10 @@ export class AcademicProvider implements IProvider {
         }
 
         const journalName = item['container-title']?.[0] || publisher;
+        const abstractClean = item.abstract ? cleanText(item.abstract).slice(0, 240) : '';
+        const snippet = abstractClean
+          ? `${abstractClean} (الدورية: ${journalName} — DOI: ${item.DOI})`
+          : `نُشر في الدورية العلمية: ${journalName}. الناشر: ${publisher}. DOI: ${item.DOI}.`;
 
         evidence.push({
           id: `academic-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -63,7 +68,7 @@ export class AcademicProvider implements IProvider {
           sourceTitle: `بحث علمي محكم: ${title}`,
           sourceDomain: 'doi.org',
           sourceDate: pubDate,
-          sourceSnippet: `نُشر في الدورية العلمية: ${journalName}. الناشر: ${publisher}. DOI: ${item.DOI}.`,
+          sourceSnippet: snippet,
           retrievedAt: new Date().toISOString(),
           sourceType: 'academic',
           reliabilityScore: 0.95, // Tier 1: Peer-Reviewed Scientific Research

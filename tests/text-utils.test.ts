@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { toWesternDigits, formatDisplayDate } from '../lib/text-utils';
+import {
+  escapeRegExp,
+  extractKeyTerms,
+  extractNumericFacts,
+  formatDisplayDate,
+  tokenize,
+  toWesternDigits,
+} from '../lib/text-utils';
 
 describe('Text & Numeral Utilities (Western Digit Enforcement)', () => {
   it('converts Eastern Arabic / Hindi digits to Western digits', () => {
@@ -39,5 +46,26 @@ describe('Text & Numeral Utilities (Western Digit Enforcement)', () => {
     const { arQuery, enQuery } = await getBilingualQueries('WHO announces cure for cancer', 'en');
     expect(enQuery).toContain('cancer');
     expect(arQuery).toMatch(/سرطان|علاج/);
+  });
+
+  it('filters Arabic and English stopwords during tokenization and keyword extraction', () => {
+    const tokens = tokenize('هذا الخبر الذي تم تداوله في مواقع التواصل عن الزلزال');
+    expect(tokens.has('هذا')).toBe(false);
+    expect(tokens.has('الذي')).toBe(false);
+    expect(tokens.has('الزلزال')).toBe(true);
+
+    const terms = extractKeyTerms('The president announced the new policy about climate change');
+    expect(terms).not.toContain('the');
+    expect(terms).not.toContain('about');
+    expect(terms).toContain('president');
+  });
+
+  it('extracts normalized numeric facts and escapes regex special characters', () => {
+    const facts = extractNumericFacts('نسبة التضخم ١٠٠٪ بقيمة 5 مليون');
+    expect(facts.some((f) => f.value === 100 && f.isPercent)).toBe(true);
+    expect(facts.some((f) => f.value === 5_000_000)).toBe(true);
+
+    const escaped = escapeRegExp('BBC News (Arabic)');
+    expect(() => new RegExp(escaped)).not.toThrow();
   });
 });

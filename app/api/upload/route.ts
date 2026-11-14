@@ -12,6 +12,29 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
+function matchesMagicBytes(buf: Buffer, mimeType: string): boolean {
+  if (buf.length < 12) return false;
+  if (mimeType === 'image/jpeg') {
+    return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  }
+  if (mimeType === 'image/png') {
+    return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  }
+  if (mimeType === 'image/gif') {
+    return buf.subarray(0, 4).toString('ascii') === 'GIF8';
+  }
+  if (mimeType === 'image/webp') {
+    return buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP';
+  }
+  if (mimeType === 'video/mp4' || mimeType === 'video/quicktime') {
+    return buf.subarray(4, 8).toString('ascii') === 'ftyp';
+  }
+  if (mimeType === 'video/webm') {
+    return buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3;
+  }
+  return false;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -33,6 +56,12 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (!matchesMagicBytes(buffer, file.type)) {
+      return NextResponse.json(
+        { error: 'محتوى الملف لا يتطابق مع نوع الملف المصرّح به.' },
+        { status: 400 }
+      );
+    }
     const base64 = buffer.toString('base64');
     const isVideo = file.type.startsWith('video/');
 

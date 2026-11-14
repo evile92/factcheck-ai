@@ -14,15 +14,84 @@ import {
 } from 'lucide-react';
 import { Language, translations } from '@/lib/i18n';
 
+interface VideoMetaPayload {
+  duration: number;
+  frames: Array<{ seconds: number; thumbnail: string }>;
+}
+
 interface InputSectionProps {
   onVerify: (data: {
     inputContent: string;
     inputType: 'text' | 'url' | 'image' | 'video';
     imageBase64?: string;
     imageMime?: string;
+    videoMeta?: VideoMetaPayload;
   }) => void;
   isLoading: boolean;
   lang: Language;
+}
+
+async function extractVideoKeyframes(objectUrl: string): Promise<VideoMetaPayload> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+
+    const cleanup = () => {
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      resolve({ duration: 20, frames: [] });
+    }, 8000);
+
+    video.onloadedmetadata = async () => {
+      const duration = isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration) : 20;
+      const samplePoints = Array.from(
+        new Set([0, Math.floor(duration * 0.25), Math.floor(duration * 0.5), Math.floor(duration * 0.75)])
+      ).filter((s) => s >= 0 && s <= duration);
+
+      const frames: Array<{ seconds: number; thumbnail: string }> = [];
+      const canvas = document.createElement('canvas');
+      const targetWidth = Math.min(640, video.videoWidth || 640);
+      const scale = video.videoWidth ? targetWidth / video.videoWidth : 1;
+      canvas.width = targetWidth;
+      canvas.height = Math.max(180, Math.round((video.videoHeight || 360) * scale));
+      const ctx = canvas.getContext('2d');
+
+      for (const sec of samplePoints) {
+        try {
+          await new Promise<void>((seekResolve) => {
+            const onSeeked = () => {
+              video.removeEventListener('seeked', onSeeked);
+              seekResolve();
+            };
+            video.addEventListener('seeked', onSeeked, { once: true });
+            video.currentTime = Math.min(sec, Math.max(0, duration - 0.1));
+            setTimeout(seekResolve, 1200);
+          });
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            frames.push({ seconds: sec, thumbnail: canvas.toDataURL('image/jpeg', 0.78) });
+          }
+        } catch {}
+      }
+
+      clearTimeout(timeoutId);
+      cleanup();
+      resolve({ duration, frames });
+    };
+
+    video.onerror = () => {
+      clearTimeout(timeoutId);
+      cleanup();
+      resolve({ duration: 20, frames: [] });
+    };
+  });
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading, lang }) => {
@@ -34,15 +103,17 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
     type: 'image' | 'video';
     base64?: string;
     mime?: string;
+    videoMeta?: VideoMetaPayload;
     name: string;
   } | null>(null);
+  const [isSamplingVideo, setIsSamplingVideo] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     setErrorMsg(null);
     if (file.size > 50 * 1024 * 1024) {
       setErrorMsg(lang === 'ar' ? 'حجم الملف كبير جداً (الحد الأقصى 50 ميجابايت).' : 'File is too large (max 50MB).');
@@ -61,17 +132,44 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
       return;
     }
 
+    if (mediaPreview?.url) {
+      URL.revokeObjectURL(mediaPreview.url);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+
+    if (isVideo) {
+      setActiveTab('video');
+      setIsSamplingVideo(true);
+      setMediaPreview({
+        url: objectUrl,
+        type: 'video',
+        mime: file.type,
+        name: file.name,
+      });
+      const videoMeta = await extractVideoKeyframes(objectUrl);
+      setMediaPreview({
+        url: objectUrl,
+        type: 'video',
+        mime: file.type,
+        videoMeta,
+        name: file.name,
+      });
+      setIsSamplingVideo(false);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target?.result as string;
       setMediaPreview({
-        url: URL.createObjectURL(file),
-        type: isImage ? 'image' : 'video',
+        url: objectUrl,
+        type: 'image',
         base64,
         mime: file.type,
         name: file.name,
       });
-      setActiveTab(isImage ? 'image' : 'video');
+      setActiveTab('image');
     };
     reader.readAsDataURL(file);
   };
@@ -132,12 +230,20 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
     }
 
     if (mediaPreview) {
-      onVerify({
-        inputContent: clean,
-        inputType: mediaPreview.type,
-        imageBase64: mediaPreview.base64,
-        imageMime: mediaPreview.mime,
-      });
+      if (mediaPreview.type === 'video') {
+        onVerify({
+          inputContent: clean,
+          inputType: 'video',
+          videoMeta: mediaPreview.videoMeta,
+        });
+      } else {
+        onVerify({
+          inputContent: clean,
+          inputType: 'image',
+          imageBase64: mediaPreview.base64,
+          imageMime: mediaPreview.mime,
+        });
+      }
     } else {
       const isUrl = clean.startsWith('http://') || clean.startsWith('https://');
       onVerify({
@@ -148,6 +254,9 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
   };
 
   const clearMedia = () => {
+    if (mediaPreview?.url) {
+      URL.revokeObjectURL(mediaPreview.url);
+    }
     setMediaPreview(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -293,9 +402,13 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
                     ? lang === 'ar'
                       ? 'تم تحميل الصورة للفحص الفني والـ OCR'
                       : 'Image loaded for forensics & OCR'
+                    : isSamplingVideo
+                    ? lang === 'ar'
+                      ? 'جاري استخراج اللقطات الزمنية من الفيديو...'
+                      : 'Sampling video keyframes...'
                     : lang === 'ar'
-                    ? 'تم تحميل الفيديو لتحليل المشاهد'
-                    : 'Video loaded for timeline check'}
+                    ? `تم استخراج ${mediaPreview.videoMeta?.frames.length || 0} لقطات للفحص (${mediaPreview.videoMeta?.duration || 20}ث)`
+                    : `Sampled ${mediaPreview.videoMeta?.frames.length || 0} keyframes (${mediaPreview.videoMeta?.duration || 20}s)`}
                 </p>
               </div>
             </div>
@@ -342,7 +455,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onVerify, isLoading,
           {/* Primary Action Button */}
           <button
             type="button"
-            disabled={isLoading}
+            disabled={isLoading || isSamplingVideo}
             onClick={handleSubmit}
             className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-md font-bold text-xs sm:text-sm text-white transition-all ${
               isLoading

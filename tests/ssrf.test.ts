@@ -9,6 +9,9 @@ describe('SSRF Protection & URL Validation', () => {
     expect(isPrivateIp('172.31.255.255')).toBe(true);
     expect(isPrivateIp('192.168.1.1')).toBe(true);
     expect(isPrivateIp('169.254.169.254')).toBe(true); // AWS/GCP metadata IP
+    expect(isPrivateIp('::ffff:127.0.0.1')).toBe(true); // IPv4-mapped IPv6 loopback
+    expect(isPrivateIp('::ffff:169.254.169.254')).toBe(true); // IPv4-mapped metadata
+    expect(isPrivateIp('100.64.0.1')).toBe(true); // CGNAT internal range
   });
 
   it('identifies public IPv4 addresses as non-private', () => {
@@ -29,6 +32,12 @@ describe('SSRF Protection & URL Validation', () => {
 
     const r4 = await validateSafeUrl('file:///etc/passwd');
     expect(r4.valid).toBe(false);
+
+    const r5 = await validateSafeUrl('http://user:pass@example.com');
+    expect(r5.valid).toBe(false);
+
+    const r6 = await validateSafeUrl('http://service.internal/secret');
+    expect(r6.valid).toBe(false);
   });
 
   it('accepts safe external URLs', async () => {

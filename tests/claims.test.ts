@@ -27,4 +27,17 @@ describe('Claim Extraction & Taxonomy System', () => {
     // Verify cross-lingual English expansion
     expect(claims[0].searchQueries.some((q) => q.includes('cancer') || q.includes('cure'))).toBe(true);
   });
+
+  it('does not misclassify border news or regular "ai" substrings as satire or tech', () => {
+    expect(extractor.classifyCategory('اشتباكات عسكرية على الحدود الشمالية بين الجيشين')).toBe('سياسي');
+    expect(extractor.classifyCategory('Onion prices rise sharply in local markets')).not.toBe('سخرية / Satire');
+    expect(extractor.classifyCategory('The minister said the claim is being reviewed')).not.toBe('تقني');
+  });
+
+  it('preserves decimal numbers when splitting multi-sentence text', () => {
+    const text =
+      'أعلن البنك المركزي أن التضخم بلغ 3.5% هذا العام وفق التقارير الرسمية المنشورة. كما أكد التقرير استقرار الاحتياطي النقدي الأجنبي خلال الربع الأول.';
+    const claims = extractor.extractClaims(text);
+    expect(claims.some((c) => c.text.includes('3.5%'))).toBe(true);
+  });
 });

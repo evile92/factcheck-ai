@@ -36,4 +36,12 @@ describe('Source Reliability Engine (5 Tiers)', () => {
     expect(resAr.tier).toBe(5);
     expect(resAr.isSatire).toBe(true);
   });
+
+  it('matches subdomains of trusted outlets and downgrades social UGC platforms', () => {
+    expect(engine.evaluateSource('ar.reuters.com').tier).toBe(2);
+    expect(engine.evaluateSource('arabic.cnn.com').tier).toBe(3);
+    expect(engine.evaluateSource('factcheck.afp.com').tier).toBe(2);
+    expect(engine.evaluateSource('x.com').tier).toBe(4);
+    expect(engine.evaluateSource('x.com').score).toBeLessThanOrEqual(0.4);
+  });
 });

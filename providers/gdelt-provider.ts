@@ -1,5 +1,6 @@
 import { IProvider, ProviderResponse } from './base-provider';
 import { EvidenceItem } from '@/types';
+import { extractKeyTerms } from '@/lib/text-utils';
 
 export class GdeltProvider implements IProvider {
   name = 'GDELT Global News Database';
@@ -24,27 +25,44 @@ export class GdeltProvider implements IProvider {
   async search(query: string): Promise<ProviderResponse> {
     const start = Date.now();
     try {
-      // Simplify query for GDELT syntax (remove quotes or complex chars)
-      const sanitized = query.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).slice(0, 4).join(' ');
-      if (!sanitized) {
+      // Extract meaningful keywords (filtering stopwords) for GDELT syntax
+      const keyTerms = extractKeyTerms(query, 5).filter((t) => t.length >= 3);
+      const sanitized = (
+        keyTerms.length > 0
+          ? keyTerms.join(' ')
+          : query.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).slice(0, 4).join(' ')
+      ).trim();
+
+      if (!sanitized || sanitized.length < 3) {
         return { providerName: this.name, success: true, evidence: [], latencyMs: 0 };
       }
 
       const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(
         sanitized
-      )}&mode=artlist&maxrecords=4&format=json`;
+      )}&mode=artlist&maxrecords=8&format=json`;
 
       const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
       if (!res.ok) {
         throw new Error(`GDELT HTTP ${res.status}`);
       }
 
-      const data = await res.json();
+      const rawText = await res.text();
+      if (!rawText.trim().startsWith('{')) {
+        return { providerName: this.name, success: true, evidence: [], latencyMs: Date.now() - start };
+      }
+
+      const data = JSON.parse(rawText);
       const articles = data.articles || [];
       const evidence: EvidenceItem[] = [];
 
       for (const art of articles) {
-        const domain = art.domain || (art.url ? new URL(art.url).hostname : 'gdeltproject.org');
+        if (!art.url) continue;
+        let domain = art.domain || 'gdeltproject.org';
+        if (!art.domain) {
+          try {
+            domain = new URL(art.url).hostname;
+          } catch {}
+        }
         const title = art.title || 'تقرير إخباري دولي';
         const seendate = art.seendate; // e.g. 20260210T120000Z
 
@@ -59,7 +77,7 @@ export class GdeltProvider implements IProvider {
           sourceTitle: title,
           sourceDomain: domain,
           sourceDate: formattedDate,
-          sourceSnippet: `المصدر الإخباري: ${domain}. تم رصد الخبر ضمن قاعدة بيانات الأحداث العالمية GDELT بتاريخ ${formattedDate || 'غير محدد'}.`,
+          sourceSnippet: `${title} — المصدر: ${domain} (${formattedDate || 'غير محدد'}).`,
           retrievedAt: new Date().toISOString(),
           sourceType: 'news',
           reliabilityScore: 0.75,

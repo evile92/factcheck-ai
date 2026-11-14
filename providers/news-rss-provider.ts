@@ -1,7 +1,7 @@
 import { IProvider, ProviderResponse } from './base-provider';
 import { EvidenceItem } from '@/types';
 import * as cheerio from 'cheerio';
-import { cleanText } from '@/lib/text-utils';
+import { cleanText, escapeRegExp, extractKeyTerms } from '@/lib/text-utils';
 
 export class NewsRssProvider implements IProvider {
   name = 'Google News Live RSS';
@@ -31,7 +31,13 @@ export class NewsRssProvider implements IProvider {
       const gl = language === 'ar' ? 'AE' : 'US';
       const ceid = language === 'ar' ? 'AE:ar' : 'US:en';
 
-      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
+      // Keep query concise so Google News RSS returns relevant matches
+      const effectiveQuery =
+        query.trim().split(/\s+/).length > 10 ? extractKeyTerms(query, 8).join(' ') || query : query;
+
+      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
+        effectiveQuery
+      )}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
 
       const res = await fetch(url, {
         headers: {
@@ -58,12 +64,18 @@ export class NewsRssProvider implements IProvider {
         const sourceEl = item.find('source');
         const sourceName = cleanText(sourceEl.text()) || 'وكالة إخبارية';
         const sourceUrlAttr = sourceEl.attr('url') || '';
-        const description = cleanText(item.find('description').text());
+
+        // Decode HTML-escaped description fragments safely
+        const rawDescHtml = item.find('description').text();
+        const decodedDesc = rawDescHtml ? cleanText(cheerio.load(rawDescHtml).text()) : '';
 
         let isoDate: string | undefined;
         try {
           if (pubDateStr) {
-            isoDate = new Date(pubDateStr).toISOString().split('T')[0];
+            const parsedDate = new Date(pubDateStr);
+            if (!isNaN(parsedDate.getTime())) {
+              isoDate = parsedDate.toISOString().split('T')[0];
+            }
           }
         } catch {
           // ignore date parse error
@@ -84,11 +96,14 @@ export class NewsRssProvider implements IProvider {
           } catch {}
         }
 
-        // Clean trailing " - SourceName" from Google News titles
+        // Clean trailing " - SourceName" safely (escaping regex special chars)
         let cleanTitle = rawTitle;
         if (sourceName && cleanTitle.endsWith(sourceName)) {
-          cleanTitle = cleanTitle.replace(new RegExp(`\\s*-\\s*${sourceName}$`), '').trim();
+          cleanTitle = cleanTitle.replace(new RegExp(`\\s*-\\s*${escapeRegExp(sourceName)}$`), '').trim();
         }
+
+        const snippet =
+          decodedDesc && decodedDesc.length > 15 && decodedDesc !== cleanTitle ? decodedDesc : cleanTitle;
 
         evidence.push({
           id: `news-rss-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -96,11 +111,11 @@ export class NewsRssProvider implements IProvider {
           sourceTitle: `${sourceName}: ${cleanTitle}`,
           sourceDomain: domain,
           sourceDate: isoDate,
-          sourceSnippet: description || cleanTitle,
+          sourceSnippet: snippet,
           retrievedAt: new Date().toISOString(),
           sourceType: 'news',
-          reliabilityScore: 0.85,
-          tier: 2,
+          reliabilityScore: 0.78,
+          tier: 3,
           stance: 'mentions',
           claimedAspect: cleanTitle,
         });

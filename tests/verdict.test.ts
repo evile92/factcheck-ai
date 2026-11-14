@@ -160,5 +160,83 @@ describe('Verdict Engine & Anti-Hallucination Decision Logic', () => {
     expect(verdict.verdict).toBe('TRUE');
     expect(verdict.confidence).toBeGreaterThanOrEqual(72);
   });
+
+  it('outputs FALSE when a single authoritative Tier 1/2 wire refutes with zero support', () => {
+    const singleRefute: EvidenceItem[] = [
+      {
+        id: 'ev-ref',
+        sourceUrl: 'https://reuters.com/world/denial',
+        sourceTitle: 'Central bank officially denies rate hike rumor',
+        sourceDomain: 'reuters.com',
+        sourceSnippet: 'Official statement denies the claim.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'wire',
+        reliabilityScore: 0.93,
+        tier: 2,
+        stance: 'refutes',
+        claimedAspect: 'نفي رسمي',
+      },
+    ];
+
+    const verdict = engine.evaluate([dummyClaim], singleRefute);
+    expect(verdict.verdict).toBe('FALSE');
+    expect(verdict.confidence).toBeGreaterThanOrEqual(70);
+  });
+
+  it('outputs MISLEADING satire for any Tier 5 satire domain including alhudood.net', () => {
+    const satireEvidence: EvidenceItem[] = [
+      {
+        id: 'ev-satire',
+        sourceUrl: 'https://alhudood.net/article/123',
+        sourceTitle: 'الحدود: خبر طريف',
+        sourceDomain: 'alhudood.net',
+        sourceSnippet: 'مقال ساخر.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.15,
+        tier: 5,
+        stance: 'mentions',
+        claimedAspect: 'خبر ساخر',
+      },
+    ];
+
+    const verdict = engine.evaluate([dummyClaim], satireEvidence);
+    expect(verdict.verdict).toBe('MISLEADING');
+    expect(verdict.verdictLabelEn).toContain('SATIRE');
+  });
+
+  it('outputs PARTLY_TRUE when credible sources strongly conflict', () => {
+    const mixedEvidence: EvidenceItem[] = [
+      {
+        id: 'ev-sup',
+        sourceUrl: 'https://aljazeera.net/news/1',
+        sourceTitle: 'تقرير يدعم جزئياً',
+        sourceDomain: 'aljazeera.net',
+        sourceSnippet: 'تفاصيل مؤكدة جزئياً.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.85,
+        tier: 3,
+        stance: 'supports',
+        claimedAspect: 'جانب 1',
+      },
+      {
+        id: 'ev-ref',
+        sourceUrl: 'https://france24.com/news/2',
+        sourceTitle: 'تقرير ينفي الأرقام',
+        sourceDomain: 'france24.com',
+        sourceSnippet: 'نفي لبعض التفاصيل.',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.85,
+        tier: 3,
+        stance: 'refutes',
+        claimedAspect: 'جانب 2',
+      },
+    ];
+
+    const verdict = engine.evaluate([dummyClaim], mixedEvidence);
+    expect(verdict.verdict).toBe('PARTLY_TRUE');
+  });
 });
 

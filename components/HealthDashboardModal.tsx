@@ -118,11 +118,25 @@ export const HealthDashboardModal: React.FC<HealthDashboardModalProps> = ({ isOp
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium text-[10px] ${
                         p.status === 'active'
                           ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : p.status === 'offline'
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
                           : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
                       }`}
                     >
                       {p.status === 'active' ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-                      <span>{p.status === 'active' ? (lang === 'ar' ? 'نشط' : 'Active') : (lang === 'ar' ? 'بديل نشط' : 'Fallback')}</span>
+                      <span>
+                        {p.status === 'active'
+                          ? lang === 'ar'
+                            ? 'نشط'
+                            : 'Active'
+                          : p.status === 'offline'
+                          ? lang === 'ar'
+                            ? 'متوقف'
+                            : 'Offline'
+                          : lang === 'ar'
+                          ? 'بديل نشط'
+                          : 'Fallback'}
+                      </span>
                     </span>
                   </td>
                   <td className="py-2.5 px-3 font-mono text-slate-600 dark:text-zinc-400">{toWesternDigits(p.latencyMs)} ms</td>

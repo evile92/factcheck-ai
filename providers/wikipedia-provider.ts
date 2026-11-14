@@ -1,6 +1,6 @@
 import { IProvider, ProviderResponse } from './base-provider';
 import { EvidenceItem } from '@/types';
-import { cleanText } from '@/lib/text-utils';
+import { cleanText, extractKeyTerms } from '@/lib/text-utils';
 
 export class WikipediaProvider implements IProvider {
   name = 'Wikipedia / Wikimedia Knowledge Base';
@@ -29,14 +29,19 @@ export class WikipediaProvider implements IProvider {
       const evidence: EvidenceItem[] = [];
       const langSubdomain = language === 'ar' ? 'ar' : 'en';
 
+      const searchQuery =
+        query.trim().length > 60 ? extractKeyTerms(query, 5).join(' ') || query : query;
+
       // 1. Search Wikipedia Opensearch / query API
       const searchUrl = `https://${langSubdomain}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
-        query
+        searchQuery
       )}&format=json&utf8=1&srlimit=3`;
 
       const searchRes = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'FactCheckAI/1.0 (https://factcheck.ai)' },
-        signal: AbortSignal.timeout(5000),
+        headers: {
+          'User-Agent': 'FactCheckDesk/1.0 (https://factcheck-desk.netlify.app; contact@factcheck-desk.netlify.app)',
+        },
+        signal: AbortSignal.timeout(8000),
       });
 
       if (!searchRes.ok) {

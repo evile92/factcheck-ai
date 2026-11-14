@@ -1,4 +1,5 @@
 import { providerCache } from './cache';
+import { escapeRegExp, extractKeyTerms } from './text-utils';
 
 export interface DetectedLanguage {
   code: 'ar' | 'en' | 'fr' | 'es' | 'de' | 'other';
@@ -127,6 +128,21 @@ export const AR_TO_EN_DICTIONARY: Record<string, string> = {
   اليونسكو: 'UNESCO',
   'صندوق النقد الدولي': 'IMF International Monetary Fund',
   'البنك الدولي': 'World Bank',
+  'البنك المركزي': 'Central Bank',
+  'سعر الفائدة': 'interest rate',
+  فائدة: 'interest rate',
+  تضخم: 'inflation',
+  دولار: 'dollar USD',
+  اقتصاد: 'economy',
+  أسهم: 'stocks market',
+  نفط: 'oil crude',
+  ذهب: 'gold',
+  'ذكاء اصطناعي': 'artificial intelligence AI',
+  حظر: 'ban banned',
+  إلغاء: 'cancel cancelled',
+  إغلاق: 'closure closed',
+  انتخابات: 'elections',
+  برلمان: 'parliament',
   رئيس: 'president',
   وزير: 'minister',
   حرب: 'war conflict',
@@ -174,6 +190,15 @@ export const EN_TO_AR_DICTIONARY: Record<string, string> = {
   airstrike: 'غارة جوية',
   fire: 'حريق',
   nasa: 'ناسا',
+  'central bank': 'البنك المركزي',
+  'interest rate': 'سعر الفائدة',
+  inflation: 'تضخم',
+  economy: 'اقتصاد',
+  dollar: 'دولار',
+  ban: 'حظر',
+  banned: 'محظور حظر',
+  ceasefire: 'هدنة وقف إطلاق النار',
+  election: 'انتخابات',
 };
 
 /**
@@ -203,7 +228,9 @@ export async function translateCrossLingual(text: string, sourceLang: string): P
         typeof translated === 'string' &&
         translated.trim().length > 0 &&
         !translated.toLowerCase().includes('quota') &&
-        !translated.toLowerCase().includes('invalid')
+        !translated.toLowerCase().includes('invalid') &&
+        !translated.toLowerCase().includes('mymemory warning') &&
+        translated.trim().toLowerCase() !== clean.toLowerCase()
       ) {
         const result = translated.trim();
         providerCache.set(cacheKey, result, 86400); // 24 hours
@@ -230,18 +257,18 @@ function dictionaryFallback(text: string, from: 'ar' | 'en', to: 'ar' | 'en'): s
     }
     const years = text.match(/\b(19\d\d|20\d\d)\b/g) || [];
     if (years.length > 0) terms.push(...years);
-    return terms.length > 0 ? terms.join(' ') : text;
+    return terms.length > 0 ? Array.from(new Set(terms)).join(' ') : text;
   } else {
-    const lower = text.toLowerCase();
     const terms: string[] = [];
     for (const [enWord, arWord] of Object.entries(EN_TO_AR_DICTIONARY)) {
-      if (lower.includes(enWord)) {
+      const wordRegex = new RegExp(`\\b${escapeRegExp(enWord)}\\b`, 'i');
+      if (wordRegex.test(text)) {
         terms.push(arWord);
       }
     }
     const years = text.match(/\b(19\d\d|20\d\d)\b/g) || [];
     if (years.length > 0) terms.push(...years);
-    return terms.length > 0 ? terms.join(' ') : text;
+    return terms.length > 0 ? Array.from(new Set(terms)).join(' ') : text;
   }
 }
 
@@ -253,19 +280,21 @@ export async function getBilingualQueries(
   detectedLangCode: string
 ): Promise<{ arQuery: string; enQuery: string }> {
   const clean = text.trim();
+  // Condense very long sentences to essential key terms so search APIs return matches
+  const concise = clean.length > 100 ? extractKeyTerms(clean, 8).join(' ') || clean.slice(0, 100) : clean;
   const isAr = detectedLangCode === 'ar' || detectLanguage(clean).code === 'ar';
 
   if (isAr) {
-    const enTranslation = await translateCrossLingual(clean, 'ar');
+    const enTranslation = await translateCrossLingual(concise, 'ar');
     return {
-      arQuery: clean,
-      enQuery: enTranslation || clean,
+      arQuery: concise,
+      enQuery: enTranslation || concise,
     };
   } else {
-    const arTranslation = await translateCrossLingual(clean, 'en');
+    const arTranslation = await translateCrossLingual(concise, 'en');
     return {
-      arQuery: arTranslation || clean,
-      enQuery: clean,
+      arQuery: arTranslation || concise,
+      enQuery: concise,
     };
   }
 }

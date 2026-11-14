@@ -15,7 +15,7 @@ import { HealthDashboardModal } from '@/components/HealthDashboardModal';
 import { ShareModal } from '@/components/ShareModal';
 import { VerificationResult } from '@/types';
 import { Language, translations } from '@/lib/i18n';
-import { Shield, Lock } from 'lucide-react';
+import { Shield, Lock, AlertCircle } from 'lucide-react';
 
 export default function Home() {
   const [lang, setLang] = useState<Language>('ar');
@@ -23,6 +23,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [currentStage, setCurrentStage] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [result, setResult] = useState<VerificationResult | null>(null);
 
   // Modals state
@@ -70,10 +71,15 @@ export default function Home() {
     inputType: 'text' | 'url' | 'image' | 'video';
     imageBase64?: string;
     imageMime?: string;
+    videoMeta?: {
+      duration: number;
+      frames: Array<{ seconds: number; thumbnail: string }>;
+    };
   }) => {
     setIsLoading(true);
     setCurrentStage(1);
     setStatusMessage(t.stages[0]?.desc || 'قراءة المحتوى...');
+    setErrorBanner(null);
     setResult(null);
 
     try {
@@ -109,29 +115,31 @@ export default function Home() {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
+            let payload: any;
             try {
-              const payload = JSON.parse(line.slice(6));
-              if (payload.type === 'progress') {
-                setCurrentStage(payload.stageIndex);
-                setStatusMessage(
-                  lang === 'en'
-                    ? t.stages[payload.stageIndex - 1]?.desc || payload.message
-                    : payload.message
-                );
-              } else if (payload.type === 'result') {
-                setResult(payload.data);
-                setCurrentStage(7);
-              } else if (payload.type === 'error') {
-                throw new Error(payload.error);
-              }
+              payload = JSON.parse(line.slice(6));
             } catch {
-              // Ignore single malformed line
+              continue; // Ignore single malformed JSON chunk
+            }
+
+            if (payload.type === 'progress') {
+              setCurrentStage(payload.stageIndex);
+              setStatusMessage(
+                lang === 'en'
+                  ? t.stages[payload.stageIndex - 1]?.desc || payload.message
+                  : payload.message
+              );
+            } else if (payload.type === 'result') {
+              setResult(payload.data);
+              setCurrentStage(7);
+            } else if (payload.type === 'error') {
+              throw new Error(payload.error || 'Verification error');
             }
           }
         }
       }
     } catch (err: any) {
-      alert(`Alert: ${err.message || 'Verification connection failed'}`);
+      setErrorBanner(err.message || 'Verification connection failed');
     } finally {
       setIsLoading(false);
     }
@@ -178,6 +186,14 @@ export default function Home() {
 
         {/* Input Console */}
         <InputSection onVerify={handleVerify} isLoading={isLoading} lang={lang} />
+
+        {/* Verification Error Alert */}
+        {errorBanner && (
+          <div className="w-full max-w-4xl mx-auto mt-4 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800/60 flex items-center gap-2.5 text-xs sm:text-sm text-rose-800 dark:text-rose-300">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{errorBanner}</span>
+          </div>
+        )}
 
         {/* Live Execution Pipeline */}
         {isLoading && (

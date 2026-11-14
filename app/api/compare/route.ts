@@ -1,8 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
+import * as cheerio from 'cheerio';
 import { globalClaimExtractor } from '@/services/claim-extractor';
 import { globalReliabilityEngine } from '@/services/reliability-engine';
 import { calculateSimilarity, cleanText } from '@/lib/text-utils';
+import { safeFetchText } from '@/lib/ssrf';
 import { ComparisonResult } from '@/types';
+
+async function resolveSourceContent(rawInput: string): Promise<{
+  text: string;
+  domain: string;
+  title?: string;
+  score: number;
+  error?: string;
+}> {
+  const trimmed = rawInput.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    const res = await safeFetchText(trimmed, { timeoutMs: 6000 });
+    if (!res.ok) {
+      return {
+        text: '',
+        domain: 'رابط محظور أو غير متاح',
+        score: 0.4,
+        error: res.error || 'تعذر جلب محتوى الرابط',
+      };
+    }
+
+    let domain = 'unknown';
+    try {
+      domain = new URL(res.finalUrl).hostname.replace(/^www\./, '');
+    } catch {}
+
+    const $ = cheerio.load(res.text);
+    $('script, style, noscript, nav, footer').remove();
+    const title = cleanText($('meta[property="og:title"]').attr('content') || $('title').text() || '');
+    const body = cleanText(
+      $('article').text() ||
+        $('main').text() ||
+        $('p')
+          .slice(0, 8)
+          .map((_, el) => $(el).text())
+          .get()
+          .join(' ')
+    );
+
+    const combinedText = cleanText(`${title}. ${body}`).slice(0, 2500);
+    const { score } = globalReliabilityEngine.evaluateSource(domain);
+
+    return {
+      text: combinedText || trimmed,
+      domain,
+      title: title || domain,
+      score,
+    };
+  }
+
+  return {
+    text: cleanText(trimmed),
+    domain: 'نص مباشر',
+    score: 0.6,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,70 +70,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'يرجى تقديم كلا المصدرين (المصدر أ والمصدر ب) للمقارنة.' }, { status: 400 });
     }
 
-    const cleanA = cleanText(sourceA);
-    const cleanB = cleanText(sourceB);
+    const [resolvedA, resolvedB] = await Promise.all([
+      resolveSourceContent(String(sourceA)),
+      resolveSourceContent(String(sourceB)),
+    ]);
+
+    if (resolvedA.error) {
+      return NextResponse.json({ error: `المصدر (أ): ${resolvedA.error}` }, { status: 400 });
+    }
+    if (resolvedB.error) {
+      return NextResponse.json({ error: `المصدر (ب): ${resolvedB.error}` }, { status: 400 });
+    }
 
     // Extract claims from both sources
-    const claimsA = globalClaimExtractor.extractClaims(cleanA);
-    const claimsB = globalClaimExtractor.extractClaims(cleanB);
+    const claimsA = globalClaimExtractor.extractClaims(resolvedA.text);
+    const claimsB = globalClaimExtractor.extractClaims(resolvedB.text);
 
     const agreements: string[] = [];
     const divergences: string[] = [];
+    const matchedBIndices = new Set<number>();
 
-    // Compare claims across A and B
+    // Bidirectional comparison of claims across A and B
     for (const ca of claimsA) {
       let matched = false;
-      for (const cb of claimsB) {
+      for (let j = 0; j < claimsB.length; j++) {
+        const cb = claimsB[j];
         const sim = calculateSimilarity(ca.text, cb.text);
-        if (sim > 0.35) {
-          agreements.push(`اتفاق في مضمون: "${ca.text.slice(0, 80)}..."`);
+        if (sim > 0.3) {
+          agreements.push(`اتفاق في مضمون: "${ca.text.slice(0, 100)}${ca.text.length > 100 ? '...' : ''}"`);
           matched = true;
+          matchedBIndices.add(j);
           break;
         }
       }
       if (!matched && ca.text.length > 20) {
-        divergences.push(`المصدر (أ) يدعي بشكل منفرد: "${ca.text.slice(0, 90)}..." (غير مذكور أو مخالف في المصدر ب).`);
+        divergences.push(
+          `المصدر (أ) يذكر بشكل منفرد: "${ca.text.slice(0, 100)}${ca.text.length > 100 ? '...' : ''}".`
+        );
       }
     }
 
-    for (const cb of claimsB) {
-      const isAlreadyCovered = agreements.some((ag) => ag.includes(cb.text.slice(0, 30)));
-      if (!isAlreadyCovered && cb.text.length > 20) {
-        divergences.push(`المصدر (ب) يذكر تفاصيل إضافية: "${cb.text.slice(0, 90)}...".`);
+    for (let j = 0; j < claimsB.length; j++) {
+      if (matchedBIndices.has(j)) continue;
+      const cb = claimsB[j];
+      if (cb.text.length > 20) {
+        divergences.push(
+          `المصدر (ب) يذكر تفاصيل إضافية/مختلفة: "${cb.text.slice(0, 100)}${cb.text.length > 100 ? '...' : ''}".`
+        );
       }
     }
 
-    // Default if completely different topics
     if (agreements.length === 0 && divergences.length === 0) {
       divergences.push('النصان يتناولان موضوعين مختلفين أو زوايا متباينة تماماً دون نقاط تقاطع واضحة.');
     }
 
-    // Reliability comparison
-    let domainA = 'نص مباشر أ';
-    let domainB = 'نص مباشر ب';
-    let scoreA = 0.6;
-    let scoreB = 0.6;
-
-    if (sourceA.startsWith('http')) {
-      try {
-        domainA = new URL(sourceA).hostname;
-        scoreA = globalReliabilityEngine.evaluateSource(domainA).score;
-      } catch {}
-    }
-    if (sourceB.startsWith('http')) {
-      try {
-        domainB = new URL(sourceB).hostname;
-        scoreB = globalReliabilityEngine.evaluateSource(domainB).score;
-      } catch {}
-    }
+    const domainA = resolvedA.domain === 'نص مباشر' ? 'نص مباشر أ' : resolvedA.domain;
+    const domainB = resolvedB.domain === 'نص مباشر' ? 'نص مباشر ب' : resolvedB.domain;
 
     let strongerEvidence: 'sourceA' | 'sourceB' | 'neutral' | 'insufficient' = 'neutral';
     let strongerExplanation = 'كلا المصدرين متقاربان في معايير الصياغة والموثوقية.';
 
-    if (scoreA > scoreB + 0.15) {
+    if (resolvedA.score > resolvedB.score + 0.15) {
       strongerEvidence = 'sourceA';
       strongerExplanation = `المصدر (أ) [${domainA}] يتمتع بتصنيف موثوقية أعلى وأدلة أكثر استقراراً.`;
-    } else if (scoreB > scoreA + 0.15) {
+    } else if (resolvedB.score > resolvedA.score + 0.15) {
       strongerEvidence = 'sourceB';
       strongerExplanation = `المصدر (ب) [${domainB}] يعتمد على مرجعية أوثق وتغطية ذات أولوية.`;
     }
@@ -84,11 +141,13 @@ export async function POST(req: NextRequest) {
     const result: ComparisonResult = {
       id: `cmp-${Date.now()}`,
       sourceA: {
-        input: cleanA.slice(0, 300),
+        input: resolvedA.text.slice(0, 300),
+        title: resolvedA.title,
         claims: claimsA.map((c) => c.text),
       },
       sourceB: {
-        input: cleanB.slice(0, 300),
+        input: resolvedB.text.slice(0, 300),
+        title: resolvedB.title,
         claims: claimsB.map((c) => c.text),
       },
       agreements,

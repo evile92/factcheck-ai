@@ -1,11 +1,71 @@
 import { ContradictionItem, EvidenceItem, ExtractedClaim } from '@/types';
 import { globalReliabilityEngine } from './reliability-engine';
-import { calculateSimilarity, tokenize } from '@/lib/text-utils';
+import { calculateSimilarity, extractNumericFacts, normalizeArabic, tokenize, toWesternDigits } from '@/lib/text-utils';
 import { generateCrossLingualQueries } from '@/lib/language';
+
+const POLARITY_OPPOSITE_PAIRS: Array<[string[], string[]]> = [
+  // Rate / price / metric increase vs hold/cut
+  [
+    ['رفع', 'يرفع', 'رفعت', 'زيادة', 'ارتفاع', 'ارتفع', 'ارتفعت', 'raise', 'raises', 'raised', 'hike', 'hiked', 'increase', 'increased'],
+    ['تثبيت', 'ثبت', 'ثبتت', 'دون تغيير', 'خفض', 'خفضت', 'تخفيض', 'انخفاض', 'تراجع', 'تراجعت', 'hold', 'holds', 'held', 'unchanged', 'pause', 'paused', 'cut', 'cuts', 'lowered', 'decrease', 'decreased'],
+  ],
+  // Cancel / ban / close vs continue / open
+  [
+    ['إلغاء', 'الغاء', 'ألغى', 'ألغت', 'حظر', 'إغلاق', 'اغلاق', 'أغلق', 'أغلقت', 'تعليق', 'cancel', 'cancelled', 'canceled', 'ban', 'banned', 'close', 'closed', 'suspend', 'suspended'],
+    ['استمرار', 'يستمر', 'تستمر', 'مفتوح', 'فتح', 'استئناف', 'عدم إلغاء', 'نفي إلغاء', 'continue', 'continues', 'continued', 'remain open', 'reopen', 'resumed', 'no ban'],
+  ],
+  // Death vs alive
+  [
+    ['وفاة', 'مقتل', 'اغتيال', 'توفي', 'مات', 'استشهاد', 'لقي حتفه', 'died', 'dies', 'killed', 'assassinated', 'dead'],
+    ['على قيد الحياة', 'حيا يرزق', 'حياً يرزق', 'حي يرزق', 'لم يمت', 'ظهر حيا', 'ظهر حياً', 'alive', 'survives', 'survived', 'unharmed'],
+  ],
+  // Universal / 100% cure vs preliminary / partial
+  [
+    ['نهائيا', 'نهائياً', 'نهائي', '100%', 'بشكل كامل', 'شامل', 'complete cure', '100 percent', 'permanent cure', 'final cure'],
+    ['جزئي', 'جزئيا', 'جزئياً', 'أولية', 'اولية', 'تجارب أولية', 'مرحلة مبكرة', 'تجريبي', 'فئران', 'على الفئران', 'preliminary', 'early stage', 'experimental', 'partial', 'mice', 'animal trial', 'phase 1', 'no cure'],
+  ],
+];
+
+function detectPolarityConflict(claimText: string, evidenceText: string): boolean {
+  const cNorm = normalizeArabic(toWesternDigits(claimText)).toLowerCase();
+  const eNorm = normalizeArabic(toWesternDigits(evidenceText)).toLowerCase();
+
+  for (const [groupA, groupB] of POLARITY_OPPOSITE_PAIRS) {
+    const normA = groupA.map((p) => normalizeArabic(p).toLowerCase());
+    const normB = groupB.map((p) => normalizeArabic(p).toLowerCase());
+
+    const claimHasA = normA.some((p) => cNorm.includes(p));
+    const claimHasB = normB.some((p) => cNorm.includes(p));
+    const evHasA = normA.some((p) => eNorm.includes(p));
+    const evHasB = normB.some((p) => eNorm.includes(p));
+
+    if (claimHasA && !claimHasB && evHasB && !evHasA) return true;
+    if (claimHasB && !claimHasA && evHasA && !evHasB) return true;
+  }
+  return false;
+}
+
+function detectNumericConflict(claimText: string, evidenceText: string): boolean {
+  const claimNums = extractNumericFacts(claimText).filter((n) => !n.isYear);
+  const evNums = extractNumericFacts(evidenceText).filter((n) => !n.isYear);
+  if (claimNums.length === 0 || evNums.length === 0) return false;
+
+  // Compare percentage values specifically when both mention percentages
+  const claimPercents = claimNums.filter((n) => n.isPercent);
+  const evPercents = evNums.filter((n) => n.isPercent);
+  if (claimPercents.length > 0 && evPercents.length > 0) {
+    const anyPercentMatches = claimPercents.some((cp) =>
+      evPercents.some((ep) => Math.abs(cp.value - ep.value) <= 5)
+    );
+    if (!anyPercentMatches) return true;
+  }
+
+  return false;
+}
 
 export class EvidenceAggregator {
   /**
-   * Aggregates, deduplicates, and enriches evidence from all providers.
+   * Aggregates, deduplicates, filters irrelevant noise, and enriches evidence from all providers.
    */
   processEvidence(rawItems: EvidenceItem[], claims: ExtractedClaim[]): {
     rankedEvidence: EvidenceItem[];
@@ -17,9 +77,15 @@ export class EvidenceAggregator {
       isRecycled: boolean;
     };
   } {
-    // 1. Deduplicate by URL and title
+    // 1. Deduplicate by URL and domain+title
     const seenUrls = new Set<string>();
-    const uniqueItems: EvidenceItem[] = [];
+    const seenDomainTitles = new Set<string>();
+    const scoredItems: Array<{
+      item: EvidenceItem;
+      overlapCount: number;
+      tokenRatio: number;
+      sim: number;
+    }> = [];
 
     for (const item of rawItems) {
       if (!item.sourceUrl || !item.sourceTitle) continue;
@@ -29,13 +95,27 @@ export class EvidenceAggregator {
       seenUrls.add(normUrl);
 
       // Verify domain and recalculate reliability score
-      const domain = item.sourceDomain || new URL(item.sourceUrl).hostname;
+      let domain = item.sourceDomain;
+      if (!domain) {
+        try {
+          domain = new URL(item.sourceUrl).hostname;
+        } catch {
+          domain = 'unknown';
+        }
+      }
+
+      const domainTitleKey = `${domain.toLowerCase()}::${normalizeArabic(item.sourceTitle).toLowerCase().slice(0, 70)}`;
+      if (seenDomainTitles.has(domainTitleKey)) continue;
+      seenDomainTitles.add(domainTitleKey);
+
       const { tier, score } = globalReliabilityEngine.evaluateSource(domain, item.sourceType);
 
       // Compute semantic alignment with claims (including cross-lingual queries)
       let maxSimWithClaims = 0;
       let maxTokenRatio = 0;
-      const evTokens = tokenize(item.sourceTitle + ' ' + item.sourceSnippet + ' ' + (item.claimedAspect || ''));
+      let bestOverlapCount = 0;
+      const evFullText = `${item.sourceTitle} ${item.sourceSnippet}`;
+      const evTokens = tokenize(`${evFullText} ${item.claimedAspect || ''}`);
 
       for (const claim of claims) {
         const candidateTexts = [
@@ -51,28 +131,45 @@ export class EvidenceAggregator {
             if (evTokens.has(tok)) overlap++;
           }
           const tokenRatio = candTokens.size > 0 ? overlap / candTokens.size : 0;
-          const sim = calculateSimilarity(cand, item.sourceTitle + ' ' + item.sourceSnippet);
+          const sim = calculateSimilarity(cand, evFullText);
 
+          if (overlap > bestOverlapCount) bestOverlapCount = overlap;
           if (tokenRatio > maxTokenRatio) maxTokenRatio = tokenRatio;
           if (sim > maxSimWithClaims) maxSimWithClaims = sim;
         }
       }
 
-      // Determine stance based on snippet content relative to claims
+      // Relevance Gate: exclude unrelated noise from non-factcheck providers
+      if (claims.length > 0 && item.sourceType !== 'factcheck') {
+        if (item.sourceType === 'academic' && bestOverlapCount < 2 && maxSimWithClaims < 0.08) {
+          continue;
+        }
+        if (item.sourceType === 'wiki' && bestOverlapCount < 2 && maxTokenRatio < 0.25) {
+          continue;
+        }
+        if (bestOverlapCount === 0 || (bestOverlapCount < 2 && maxTokenRatio < 0.2 && maxSimWithClaims < 0.06)) {
+          continue;
+        }
+      }
+
+      // Determine stance based on refutation markers, polarity conflicts, numeric facts, and overlap
       let computedStance = item.stance;
       if (computedStance === 'mentions') {
-        const text = (item.sourceTitle + ' ' + item.sourceSnippet).toLowerCase();
+        const textNorm = normalizeArabic(toWesternDigits(evFullText)).toLowerCase();
 
-        // 1. Refutation / Denial / Rumor patterns
+        // 1. Refutation / Denial / Rumor / Exaggeration patterns
         const refutationPatterns = [
           'غير صحيح',
           'كاذب',
           'مفبرك',
           'شائعة',
           'شائعات',
+          'اشاعة',
+          'إشاعة',
           'تنفي',
           'ينفي',
           'نفت',
+          'نفى',
           'نفي',
           'لا صحة',
           'مزاعم',
@@ -81,10 +178,16 @@ export class EvidenceAggregator {
           'تكذيب',
           'تفنيد',
           'لم يمت',
+          'لم يحدث',
+          'لم يصدر',
+          'لم يعلن',
+          'لم تعلن',
           'حياً يرزق',
+          'حيا يرزق',
           'على قيد الحياة',
           'تراجع عن',
           'لا أساس له',
+          'لا اساس له',
           'عار عن الصحة',
           'عاري عن الصحة',
           'فبركة',
@@ -94,6 +197,14 @@ export class EvidenceAggregator {
           'صورة قديمة',
           'فيديو قديم',
           'تحريف',
+          'خبر زائف',
+          'ادعاء باطل',
+          'غير دقيق',
+          'مبالغ فيه',
+          'لا يوجد دليل',
+          'تجارب أولية',
+          'تجارب اولية',
+          'على الفئران',
           'false',
           'fake',
           'hoax',
@@ -101,12 +212,17 @@ export class EvidenceAggregator {
           'debunked',
           'denies',
           'denied',
+          'deny',
           'refutes',
+          'refuted',
           'untrue',
           'rumor',
+          'rumour',
+          'rumors',
           'rumours',
           'unfounded',
           'dismisses',
+          'dismissed',
           'claims are false',
           'baseless',
           'fabricated',
@@ -115,11 +231,19 @@ export class EvidenceAggregator {
           'doctored',
           'manipulated',
           'no evidence',
-        ];
+          'not true',
+          'did not',
+          'never happened',
+          'no cure',
+          'preliminary',
+          'in mice',
+          'phase 1',
+          'exaggerated',
+        ].map((p) => normalizeArabic(p).toLowerCase());
 
-        // 2. Corroboration / Confirmation / Declarative Reporting patterns
+        // 2. Corroboration / Confirmation / Declarative Attribution patterns
         const confirmationPatterns = [
-          // Arabic official, declarative & reporting verbs
+          // Arabic official & corroborating patterns
           'أكدت',
           'أكد',
           'تأكيد',
@@ -133,59 +257,18 @@ export class EvidenceAggregator {
           'أعلن',
           'أعلنت',
           'إعلان',
-          'صرح',
-          'صرحت',
-          'قال',
-          'قالت',
-          'أفاد',
-          'أفادت',
-          'أوضح',
-          'أوضحت',
-          'كشف',
-          'كشفت',
-          'نقل عن',
-          'نقلت',
           'يرجح',
           'رجح',
           'رجحت',
-          'يحمل',
-          'حملت',
           'وقوف',
           'مسؤولية',
-          'مقتل',
-          'وفاة',
-          'اغتيال',
-          'استشهاد',
-          'سقوط',
           'تأكد من مقتل',
           'تأكيد مقتل',
-          'لقي حتفه',
-          'رحيل',
-          'إصابة',
-          'إصابات',
-          'استهداف',
-          'هجوم',
-          'قصف',
-          'ضربة',
-          'انفجار',
-          'اعتداء',
           'توقيع',
-          'اتفاق',
           'اتفاقية',
-          'استقالة',
-          'استقال',
-          'اعتقال',
-          'اعتقلت',
-          'احتجاز',
-          'محاكمة',
-          'إدانة',
-          'الحكم على',
-          'فوز',
-          'انتصار',
-          'قرار',
           'إقرار',
           'مصادقة',
-          // English reporting and attribution verbs
+          // English official & corroborating patterns
           'confirmed',
           'confirming',
           'confirms',
@@ -195,97 +278,70 @@ export class EvidenceAggregator {
           'announces',
           'announced',
           'announcement',
-          'says',
-          'said',
-          'stated',
-          'states',
-          'reports',
-          'reported',
-          'revealed',
-          'reveals',
-          'according to',
           'likely',
           'probably',
           'responsible',
           'behind',
-          'accuses',
-          'accused',
-          'blames',
-          'blamed',
-          'died',
-          'killed',
-          'assassinated',
-          'assassination',
-          'death of',
-          'casualty',
-          'casualties',
-          'injured',
-          'attack',
-          'attacked',
-          'strike',
-          'struck',
-          'targeted',
-          'explosion',
-          'blast',
-          'agreement',
           'signed',
-          'resigns',
-          'resigned',
-          'arrested',
-          'convicted',
-          'wins',
-          'won',
           'approved',
           'passed',
-        ];
+        ].map((p) => normalizeArabic(p).toLowerCase());
 
-        const hasRefutation = refutationPatterns.some((pattern) => text.includes(pattern));
-        const hasConfirmation = confirmationPatterns.some((pattern) => text.includes(pattern));
+        const hasRefutation = refutationPatterns.some((pattern) => textNorm.includes(pattern));
+        const hasConfirmation = confirmationPatterns.some((pattern) => textNorm.includes(pattern));
 
-        if (hasRefutation) {
+        // Check polarity and numeric conflicts against primary claims
+        const hasPolarityConflict =
+          bestOverlapCount >= 2 && claims.some((c) => detectPolarityConflict(c.text, evFullText));
+        const hasNumericConflict =
+          bestOverlapCount >= 2 && claims.some((c) => detectNumericConflict(c.text, evFullText));
+
+        if (hasRefutation || hasPolarityConflict) {
           computedStance = 'refutes';
+        } else if (hasNumericConflict) {
+          computedStance = 'neutral';
         } else if (
-          // Condition 1: Direct confirmation / reporting keyword + at least minimal relevance to claims
-          (hasConfirmation && (maxTokenRatio >= 0.2 || maxSimWithClaims >= 0.08 || claims.length === 0)) ||
-          // Condition 2: High semantic match from credible news source (Tier 1-3) reporting on the claim
-          (tier <= 3 && (maxTokenRatio >= 0.35 || maxSimWithClaims >= 0.18)) ||
-          // Condition 3: Wikipedia biographical/historical confirmation
-          (item.sourceType === 'wiki' &&
-            (text.includes('اغتيال') ||
-              text.includes('مقتل') ||
-              text.includes('وفاة') ||
-              text.includes('assassinated') ||
-              text.includes('assassination') ||
-              text.includes('killed') ||
-              text.includes('death') ||
-              maxTokenRatio >= 0.5))
+          // Condition 1: Direct confirmation keyword + meaningful overlap
+          (hasConfirmation &&
+            (claims.length === 0 || (bestOverlapCount >= 2 && (maxTokenRatio >= 0.25 || maxSimWithClaims >= 0.1)))) ||
+          // Condition 2: High semantic match from credible news/wire/official source (Tier 1-3)
+          (tier <= 3 &&
+            item.sourceType !== 'wiki' &&
+            item.sourceType !== 'academic' &&
+            bestOverlapCount >= 3 &&
+            (maxTokenRatio >= 0.45 || maxSimWithClaims >= 0.22)) ||
+          // Condition 3: Wikipedia strict semantic match (only when highly aligned)
+          (item.sourceType === 'wiki' && bestOverlapCount >= 3 && maxTokenRatio >= 0.55)
         ) {
           computedStance = 'supports';
         }
       }
 
-      uniqueItems.push({
-        ...item,
-        sourceDomain: domain,
-        tier,
-        reliabilityScore: score,
-        stance: computedStance,
+      scoredItems.push({
+        item: {
+          ...item,
+          sourceDomain: domain,
+          tier,
+          reliabilityScore: score,
+          stance: computedStance,
+        },
+        overlapCount: bestOverlapCount,
+        tokenRatio: maxTokenRatio,
+        sim: maxSimWithClaims,
       });
     }
 
     // 2. Rank evidence:
-    // Live news agencies and accredited fact checkers take priority over static encyclopedic articles (Wikipedia)
-    const rankedEvidence = uniqueItems.sort((a, b) => {
-      const isLiveA = a.sourceType === 'news' || a.sourceType === 'factcheck';
-      const isLiveB = b.sourceType === 'news' || b.sourceType === 'factcheck';
+    // Prioritize factcheck & live news with high relevance & active stance over static encyclopedias
+    scoredItems.sort((aEntry, bEntry) => {
+      const a = aEntry.item;
+      const b = bEntry.item;
 
-      // Always prioritize news agency reports over encyclopedic background
-      if (isLiveA && !isLiveB && b.sourceType === 'wiki') {
-        return -1;
-      }
-      if (isLiveB && !isLiveA && a.sourceType === 'wiki') {
-        return 1;
-      }
+      const isLiveA = a.sourceType === 'news' || a.sourceType === 'factcheck' || a.sourceType === 'wire';
+      const isLiveB = b.sourceType === 'news' || b.sourceType === 'factcheck' || b.sourceType === 'wire';
+
+      if (isLiveA && !isLiveB && b.sourceType === 'wiki') return -1;
+      if (isLiveB && !isLiveA && a.sourceType === 'wiki') return 1;
 
       // Active stance (supports / refutes) over neutral mention
       const activeA = a.stance === 'supports' || a.stance === 'refutes';
@@ -293,9 +349,11 @@ export class EvidenceAggregator {
       if (activeA && !activeB) return -1;
       if (!activeA && activeB) return 1;
 
-      // Sort primarily by reliability score
-      if (b.reliabilityScore !== a.reliabilityScore) {
-        return b.reliabilityScore - a.reliabilityScore;
+      // Combine reliability and claim relevance
+      const rankScoreA = a.reliabilityScore * 0.65 + Math.min(1, aEntry.tokenRatio) * 0.35;
+      const rankScoreB = b.reliabilityScore * 0.65 + Math.min(1, bEntry.tokenRatio) * 0.35;
+      if (Math.abs(rankScoreB - rankScoreA) > 0.04) {
+        return rankScoreB - rankScoreA;
       }
 
       // Sort by date (most recent first)
@@ -303,6 +361,8 @@ export class EvidenceAggregator {
       const dateB = b.sourceDate ? new Date(b.sourceDate).getTime() : 0;
       return dateB - dateA;
     });
+
+    const rankedEvidence = scoredItems.map((s) => s.item);
 
     // 3. Map evidence items to claims
     for (const claim of claims) {
@@ -314,7 +374,7 @@ export class EvidenceAggregator {
       ];
 
       for (const ev of rankedEvidence) {
-        const evTokens: Set<string> = tokenize(ev.sourceTitle + ' ' + ev.sourceSnippet + ' ' + (ev.claimedAspect || ''));
+        const evTokens: Set<string> = tokenize(`${ev.sourceTitle} ${ev.sourceSnippet} ${ev.claimedAspect || ''}`);
         let isMatch = false;
 
         for (const cand of candidateTexts) {
@@ -324,11 +384,11 @@ export class EvidenceAggregator {
             if (evTokens.has(tok)) overlap++;
           }
           const tokenRatio = candTokens.size > 0 ? overlap / candTokens.size : 0;
-          const sim = calculateSimilarity(cand, ev.sourceTitle + ' ' + ev.sourceSnippet);
+          const sim = calculateSimilarity(cand, `${ev.sourceTitle} ${ev.sourceSnippet}`);
 
           if (
             sim > 0.08 ||
-            tokenRatio >= 0.35 ||
+            (overlap >= 2 && tokenRatio >= 0.35) ||
             (ev.claimedAspect && cand.includes(ev.claimedAspect)) ||
             (ev.claimedAspect && ev.claimedAspect.includes(cand))
           ) {
@@ -359,7 +419,7 @@ export class EvidenceAggregator {
       } else if (topRef.tier < topSupp.tier) {
         explanation = `المصدر النافي (${topRef.sourceDomain}) ينتمي لتصنيف موثوقية أعلى (المستوى ${topRef.tier}) مقارنة بالمصدر الداعم.`;
       } else {
-        explanation = 'المصادر المستقلة متساوية في الموثوقية لكنها تختلف في التقييم أو زاوية التغطية.';
+        explanation = 'المصادر المستقلة متقاربة في الموثوقية لكنها تختلف في التقييم أو تنفي تفاصيل أساسية في الادعاء.';
       }
 
       contradictions.push({
@@ -374,7 +434,7 @@ export class EvidenceAggregator {
         sourceB: {
           name: topRef.sourceDomain,
           url: topRef.sourceUrl,
-          stance: 'ينفي / يكذب',
+          stance: 'ينفي / يعارض',
           date: topRef.sourceDate,
           tier: topRef.tier,
         },
@@ -382,7 +442,7 @@ export class EvidenceAggregator {
       });
     }
 
-    // 5. Check Earliest Context / Context Recycling
+    // 5. Check Earliest Context / Context Recycling (EXCLUDING static Wikipedia & Academic background papers!)
     let earliestContext: {
       firstSeenDate?: string;
       firstSeenUrl?: string;
@@ -390,18 +450,37 @@ export class EvidenceAggregator {
       isRecycled: boolean;
     } | undefined;
 
-    const datesWithItems = rankedEvidence
-      .filter((e) => e.sourceDate)
-      .map((e) => ({ date: e.sourceDate!, item: e }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const currentYear = new Date().getFullYear();
+    const nowMs = Date.now();
+    const newsOrFactcheckScored = scoredItems.filter(
+      (s) =>
+        s.item.sourceDate &&
+        (s.item.sourceType === 'news' || s.item.sourceType === 'factcheck' || s.item.sourceType === 'wire') &&
+        (s.overlapCount >= 2 || s.item.sourceType === 'factcheck')
+    );
+
+    const datesWithItems = newsOrFactcheckScored
+      .map((s) => ({ date: s.item.sourceDate!, item: s.item, ms: new Date(s.item.sourceDate!).getTime() }))
+      .filter((d) => !isNaN(d.ms))
+      .sort((a, b) => a.ms - b.ms);
 
     if (datesWithItems.length > 0) {
       const earliest = datesWithItems[0];
-      const earliestYear = new Date(earliest.date).getFullYear();
-      const currentYear = new Date().getFullYear();
+      const earliestYear = new Date(earliest.ms).getFullYear();
+      const hasFreshNews = datesWithItems.some((d) => nowMs - d.ms < 180 * 86400 * 1000);
+      const claimExplicitlyMentionsYear = claims.some((c) => c.text.includes(String(earliestYear)));
+      const factCheckFlagsOldContext = rankedEvidence.some(
+        (e) =>
+          e.sourceType === 'factcheck' &&
+          /(صورة قديمة|فيديو قديم|قديمة|معاد تدوير|سياق قديم|old photo|old video|out of context|recycled)/i.test(
+            `${e.sourceTitle} ${e.sourceSnippet}`
+          )
+      );
 
-      // If earliest occurrence is more than 1 year older than current year, might be recycled
-      const isRecycled = earliestYear < currentYear - 1;
+      // Recycled only if explicitly flagged by a fact-checker OR all matching news coverage is >1 year old and not a fresh breaking story
+      const isRecycled =
+        factCheckFlagsOldContext ||
+        (earliestYear < currentYear - 1 && !hasFreshNews && !claimExplicitlyMentionsYear);
 
       earliestContext = {
         firstSeenDate: earliest.date,
@@ -412,7 +491,7 @@ export class EvidenceAggregator {
     }
 
     return {
-      rankedEvidence: rankedEvidence.slice(0, 10), // Return top 10 relevant items
+      rankedEvidence: rankedEvidence.slice(0, 10),
       contradictions,
       earliestContext,
     };

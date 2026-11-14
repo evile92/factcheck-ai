@@ -190,4 +190,64 @@ describe('Evidence Aggregator & Stance Detection', () => {
     const { earliestContext } = aggregator.processEvidence(rawItems, [trumpClaim]);
     expect(earliestContext?.isRecycled).toBe(false);
   });
+
+  it('rejects off-topic news sharing only one country name and a reporting verb (e.g. China + announces)', () => {
+    const feminismClaim: ExtractedClaim = {
+      id: 'c-fem',
+      text: 'الصين تعلن الحرب على النسوية',
+      category: 'سياسي',
+      language: 'ar',
+      searchQueries: ['الصين تعلن الحرب على النسوية', 'China war conflict fact check'],
+      evidenceIds: [],
+    };
+
+    const rawItems: EvidenceItem[] = [
+      {
+        id: 'offtopic-iran',
+        sourceUrl: 'https://aljazeera.net/news/china-iran',
+        sourceTitle: 'الجزيرة نت: الصين تحث طهران وواشنطن على التهدئة وتعلن استعدادها للدفاع عن مصالح إيران',
+        sourceDomain: 'aljazeera.net',
+        sourceDate: '2026-09-16',
+        sourceSnippet: 'الصين تحث طهران وواشنطن على التهدئة وتعلن استعدادها للدفاع عن مصالح إيران الجزيرة نت',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.85,
+        tier: 3,
+        stance: 'mentions',
+        claimedAspect: 'الصين وإيران',
+      },
+      {
+        id: 'offtopic-taiwan',
+        sourceUrl: 'https://mc-doualiya.com/news/china-taiwan',
+        sourceTitle: 'مونت كارلو الدولية: الصين تعلن عن إجراءات لتعزيز العلاقات مع تايوان.. فما هي؟',
+        sourceDomain: 'mc-doualiya.com',
+        sourceDate: '2026-04-12',
+        sourceSnippet: 'الصين تعلن عن إجراءات لتعزيز العلاقات مع تايوان.. فما هي؟ مونت كارلو الدولية',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.78,
+        tier: 3,
+        stance: 'mentions',
+        claimedAspect: 'الصين وتايوان',
+      },
+      {
+        id: 'offtopic-fem',
+        sourceUrl: 'https://aljazeera.net/news/feminism-market',
+        sourceTitle: 'الجزيرة نت: النسوية الجديدة.. كيف وضعت المرأة تحت مذبح السوق؟',
+        sourceDomain: 'aljazeera.net',
+        sourceDate: '2018-11-20',
+        sourceSnippet: 'النسوية الجديدة.. كيف وضعت المرأة تحت مذبح السوق؟ الجزيرة نت',
+        retrievedAt: new Date().toISOString(),
+        sourceType: 'news',
+        reliabilityScore: 0.85,
+        tier: 3,
+        stance: 'mentions',
+        claimedAspect: 'النسوية الجديدة',
+      },
+    ];
+
+    const { rankedEvidence } = aggregator.processEvidence(rawItems, [feminismClaim]);
+    expect(rankedEvidence.length).toBe(0);
+    expect(rankedEvidence.some((e) => e.stance === 'supports')).toBe(false);
+  });
 });

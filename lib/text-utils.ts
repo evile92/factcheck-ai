@@ -66,6 +66,19 @@ const EN_STOPWORDS = new Set([
 
 const IMPORTANT_SHORT_TOKENS = new Set(['ai', 'un', 'us', 'uk', 'eu', 'uae', 'gcc']);
 
+const GENERIC_REPORTING_VERBS = new Set([
+  'يعلن', 'تعلن', 'اعلن', 'اعلنت', 'اعلان',
+  'يقول', 'تقول', 'قال', 'قالت', 'صرح', 'صرحت',
+  'يفيد', 'تفيد', 'افاد', 'افادت', 'ذكر', 'ذكرت',
+  'نقل', 'نقلت', 'كشف', 'كشفت', 'اكد', 'اكدت',
+  'اشار', 'اشارت', 'اوضح', 'اوضحت', 'شدد', 'شددت',
+  'نشر', 'نشرت', 'تداول', 'تداولت', 'يزعم', 'تزعم', 'زعم',
+  'say', 'says', 'said', 'announce', 'announces', 'announced',
+  'report', 'reports', 'reported', 'state', 'states', 'stated',
+  'claim', 'claims', 'claimed', 'declare', 'declares', 'declared',
+  'reveal', 'reveals', 'revealed', 'according',
+].map((w) => w));
+
 /**
  * Normalizes Arabic characters (Hamzas, Teh Marbuta, Alef Maqsura).
  */
@@ -78,6 +91,46 @@ export function normalizeArabic(text: string): string {
 }
 
 const NORMALIZED_AR_STOPWORDS = new Set(Array.from(AR_STOPWORDS).map((w) => normalizeArabic(w)));
+const NORMALIZED_REPORTING_VERBS = new Set(Array.from(GENERIC_REPORTING_VERBS).map((w) => normalizeArabic(w)));
+
+/**
+ * Reduces a single normalized word to one canonical concept stem (no duplicate tokens for one word).
+ */
+export function canonicalizeWord(word: string): string {
+  let w = normalizeArabic(toWesternDigits(word)).toLowerCase();
+  if (w.startsWith('وال') && w.length > 5) w = w.slice(3);
+  else if (w.startsWith('فال') && w.length > 5) w = w.slice(3);
+  else if (w.startsWith('بال') && w.length > 5) w = w.slice(3);
+  else if (w.startsWith('كال') && w.length > 5) w = w.slice(3);
+  else if (w.startsWith('ال') && w.length > 4) w = w.slice(2);
+  else if (w.startsWith('لل') && w.length > 4) w = w.slice(2);
+  return w;
+}
+
+/**
+ * Tokenizes text into unique canonical concepts (1 token per surface word — prevents double-counting "الـ" prefixes).
+ */
+export function tokenizeUniqueConcepts(str: string, excludeReportingVerbs = false): Set<string> {
+  const western = toWesternDigits(str);
+  const normalized = normalizeArabic(western)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .trim();
+  const words = normalized.split(/\s+/).filter((w) => w.length > 2 || IMPORTANT_SHORT_TOKENS.has(w) || /^\d+$/.test(w));
+  const conceptSet = new Set<string>();
+
+  for (const raw of words) {
+    if (NORMALIZED_AR_STOPWORDS.has(raw) || EN_STOPWORDS.has(raw)) continue;
+    const stem = canonicalizeWord(raw);
+    if (!stem || NORMALIZED_AR_STOPWORDS.has(stem) || EN_STOPWORDS.has(stem)) continue;
+    if (excludeReportingVerbs && (NORMALIZED_REPORTING_VERBS.has(raw) || NORMALIZED_REPORTING_VERBS.has(stem))) {
+      continue;
+    }
+    conceptSet.add(stem);
+  }
+
+  return conceptSet;
+}
 
 /**
  * Tokenize string into a set of normalized, stopword-filtered words for semantic similarity matching.

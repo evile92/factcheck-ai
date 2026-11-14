@@ -79,12 +79,20 @@ export const AR_TO_EN_DICTIONARY: Record<string, string> = {
   القاهرة: 'Cairo',
   أمريكا: 'United States',
   'الولايات المتحدة': 'United States US',
+  السعودية: 'Saudi Arabia',
   روسيا: 'Russia',
   موسكو: 'Moscow',
   الصين: 'China',
   بكين: 'Beijing',
   أوكرانيا: 'Ukraine',
   كييف: 'Kyiv',
+  النسوية: 'feminism feminist',
+  نسوية: 'feminism feminist',
+  أنابيب: 'pipeline',
+  النفط: 'oil crude',
+  يرجح: 'probably likely',
+  وقوف: 'behind responsible',
+  استهداف: 'attack strike targeted',
 
   // Actions & Incidents
   اغتيال: 'assassination killed',
@@ -146,6 +154,7 @@ export const AR_TO_EN_DICTIONARY: Record<string, string> = {
   رئيس: 'president',
   وزير: 'minister',
   حرب: 'war conflict',
+  الحرب: 'war',
   هدنة: 'ceasefire truce',
   'بيان رسمي': 'official statement',
 };
@@ -166,9 +175,17 @@ export const EN_TO_AR_DICTIONARY: Record<string, string> = {
   iraq: 'العراق',
   yemen: 'اليمن',
   egypt: 'مصر',
+  saudi: 'السعودية',
   russia: 'روسيا',
   china: 'الصين',
   ukraine: 'أوكرانيا',
+  feminism: 'النسوية نسوية',
+  feminist: 'النسوية نسوية',
+  war: 'حرب الحرب',
+  pipeline: 'أنابيب',
+  oil: 'النفط نفط',
+  probably: 'يرجح',
+  behind: 'وقوف',
   assassination: 'اغتيال',
   assassinated: 'اغتيال مقتل',
   killed: 'مقتل',
@@ -270,6 +287,36 @@ function dictionaryFallback(text: string, from: 'ar' | 'en', to: 'ar' | 'en'): s
     if (years.length > 0) terms.push(...years);
     return terms.length > 0 ? Array.from(new Set(terms)).join(' ') : text;
   }
+}
+
+/**
+ * Expands a single claim token into its known cross-lingual equivalents so cross-lingual
+ * matching can evaluate coverage against the full claim concept count without shrinking the denominator.
+ */
+export function getCrossLingualEquivalents(concept: string, sourceLang: string): string[] {
+  const equivalents: string[] = [concept];
+  if (sourceLang === 'ar') {
+    for (const [arKey, enVal] of Object.entries(AR_TO_EN_DICTIONARY)) {
+      const normKey = arKey.replace(/[إأآءئؤ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+      const strippedKey = normKey.startsWith('ال') && normKey.length > 4 ? normKey.slice(2) : normKey;
+      if (concept === normKey || concept === strippedKey) {
+        for (const enTok of enVal.toLowerCase().split(/\s+/)) {
+          if (enTok.length >= 2) equivalents.push(enTok);
+        }
+      }
+    }
+  } else {
+    for (const [enKey, arVal] of Object.entries(EN_TO_AR_DICTIONARY)) {
+      if (concept === enKey.toLowerCase()) {
+        for (const arTok of arVal.split(/\s+/)) {
+          const normAr = arTok.replace(/[إأآءئؤ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+          const stripped = normAr.startsWith('ال') && normAr.length > 4 ? normAr.slice(2) : normAr;
+          equivalents.push(normAr, stripped);
+        }
+      }
+    }
+  }
+  return Array.from(new Set(equivalents));
 }
 
 /**

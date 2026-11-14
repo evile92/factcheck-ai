@@ -1,7 +1,14 @@
 import { ContradictionItem, EvidenceItem, ExtractedClaim } from '@/types';
 import { globalReliabilityEngine } from './reliability-engine';
-import { calculateSimilarity, extractNumericFacts, normalizeArabic, tokenize, toWesternDigits } from '@/lib/text-utils';
-import { generateCrossLingualQueries } from '@/lib/language';
+import {
+  calculateSimilarity,
+  extractNumericFacts,
+  normalizeArabic,
+  tokenize,
+  tokenizeUniqueConcepts,
+  toWesternDigits,
+} from '@/lib/text-utils';
+import { detectLanguage, generateCrossLingualQueries, getCrossLingualEquivalents } from '@/lib/language';
 
 const POLARITY_OPPOSITE_PAIRS: Array<[string[], string[]]> = [
   // Rate / price / metric increase vs hold/cut
@@ -63,6 +70,65 @@ function detectNumericConflict(claimText: string, evidenceText: string): boolean
   return false;
 }
 
+function computeClaimAlignment(
+  claim: ExtractedClaim,
+  evFullText: string,
+  claimedAspect?: string
+): {
+  substantiveMatched: number;
+  substantiveTotal: number;
+  substantiveRatio: number;
+  conceptMatched: number;
+  conceptRatio: number;
+  sim: number;
+} {
+  const evTextCombined = `${evFullText} ${claimedAspect || ''}`;
+  const evConcepts = tokenizeUniqueConcepts(evTextCombined, false);
+  const evTokensFull = tokenize(evTextCombined);
+  const evLang = detectLanguage(evFullText).code;
+  const claimLang = claim.language || detectLanguage(claim.text).code;
+  const isCrossLingual = evLang !== claimLang;
+
+  const allClaimConcepts = tokenizeUniqueConcepts(claim.text, false);
+  const substantiveConcepts = tokenizeUniqueConcepts(claim.text, true);
+  const effectiveSubstantive = substantiveConcepts.size > 0 ? substantiveConcepts : allClaimConcepts;
+
+  const matchesConcept = (concept: string): boolean => {
+    if (evConcepts.has(concept) || evTokensFull.has(concept)) return true;
+    if (isCrossLingual) {
+      const equivs = getCrossLingualEquivalents(concept, claimLang);
+      for (const eq of equivs) {
+        if (evConcepts.has(eq) || evTokensFull.has(eq)) return true;
+      }
+    }
+    return false;
+  };
+
+  let substantiveMatched = 0;
+  for (const c of effectiveSubstantive) {
+    if (matchesConcept(c)) substantiveMatched++;
+  }
+
+  let conceptMatched = 0;
+  for (const c of allClaimConcepts) {
+    if (matchesConcept(c)) conceptMatched++;
+  }
+
+  const substantiveTotal = effectiveSubstantive.size;
+  const substantiveRatio = substantiveTotal > 0 ? substantiveMatched / substantiveTotal : 0;
+  const conceptRatio = allClaimConcepts.size > 0 ? conceptMatched / allClaimConcepts.size : 0;
+  const sim = calculateSimilarity(claim.text, evFullText);
+
+  return {
+    substantiveMatched,
+    substantiveTotal,
+    substantiveRatio,
+    conceptMatched,
+    conceptRatio,
+    sim,
+  };
+}
+
 export class EvidenceAggregator {
   /**
    * Aggregates, deduplicates, filters irrelevant noise, and enriches evidence from all providers.
@@ -84,6 +150,9 @@ export class EvidenceAggregator {
       item: EvidenceItem;
       overlapCount: number;
       tokenRatio: number;
+      substantiveMatched: number;
+      substantiveTotal: number;
+      substantiveRatio: number;
       sim: number;
     }> = [];
 
@@ -110,49 +179,53 @@ export class EvidenceAggregator {
 
       const { tier, score } = globalReliabilityEngine.evaluateSource(domain, item.sourceType);
 
-      // Compute semantic alignment with claims (including cross-lingual queries)
-      let maxSimWithClaims = 0;
-      let maxTokenRatio = 0;
-      let bestOverlapCount = 0;
+      // Compute semantic alignment directly against each extracted claim (no subset-query inflation!)
       const evFullText = `${item.sourceTitle} ${item.sourceSnippet}`;
-      const evTokens = tokenize(`${evFullText} ${item.claimedAspect || ''}`);
+      let bestSim = 0;
+      let bestConceptRatio = 0;
+      let bestConceptMatched = 0;
+      let bestSubstantiveMatched = 0;
+      let bestSubstantiveTotal = 0;
+      let bestSubstantiveRatio = 0;
 
       for (const claim of claims) {
-        const candidateTexts = [
-          claim.text,
-          ...(claim.searchQueries || []),
-          ...generateCrossLingualQueries(claim.text, claim.language || 'ar'),
-        ];
-
-        for (const cand of candidateTexts) {
-          const candTokens = tokenize(cand);
-          let overlap = 0;
-          for (const tok of candTokens) {
-            if (evTokens.has(tok)) overlap++;
-          }
-          const tokenRatio = candTokens.size > 0 ? overlap / candTokens.size : 0;
-          const sim = calculateSimilarity(cand, evFullText);
-
-          if (overlap > bestOverlapCount) bestOverlapCount = overlap;
-          if (tokenRatio > maxTokenRatio) maxTokenRatio = tokenRatio;
-          if (sim > maxSimWithClaims) maxSimWithClaims = sim;
+        const align = computeClaimAlignment(claim, evFullText, item.claimedAspect);
+        if (
+          align.substantiveRatio > bestSubstantiveRatio ||
+          (align.substantiveRatio === bestSubstantiveRatio && align.substantiveMatched > bestSubstantiveMatched)
+        ) {
+          bestSubstantiveMatched = align.substantiveMatched;
+          bestSubstantiveTotal = align.substantiveTotal;
+          bestSubstantiveRatio = align.substantiveRatio;
         }
+        if (align.conceptMatched > bestConceptMatched) bestConceptMatched = align.conceptMatched;
+        if (align.conceptRatio > bestConceptRatio) bestConceptRatio = align.conceptRatio;
+        if (align.sim > bestSim) bestSim = align.sim;
       }
 
-      // Relevance Gate: exclude unrelated noise from non-factcheck providers
+      // Strict Relevance Gate: prevent single-entity or off-topic articles from passing
       if (claims.length > 0 && item.sourceType !== 'factcheck') {
-        if (item.sourceType === 'academic' && bestOverlapCount < 2 && maxSimWithClaims < 0.08) {
+        if (item.sourceType === 'academic' && (bestSubstantiveMatched < 2 || bestSubstantiveRatio < 0.5)) {
           continue;
         }
-        if (item.sourceType === 'wiki' && bestOverlapCount < 2 && maxTokenRatio < 0.25) {
+        if (item.sourceType === 'wiki' && (bestSubstantiveMatched < 2 || bestSubstantiveRatio < 0.55)) {
           continue;
         }
-        if (bestOverlapCount === 0 || (bestOverlapCount < 2 && maxTokenRatio < 0.2 && maxSimWithClaims < 0.06)) {
-          continue;
+        if (bestSubstantiveTotal <= 3) {
+          // Short claims (<= 3 substantive concepts like "الصين + حرب + نسوية") require at least 2 distinct substantive concepts (>= 60%)
+          const requiredCount = Math.min(2, bestSubstantiveTotal);
+          if (bestSubstantiveMatched < requiredCount || bestSubstantiveRatio < 0.6) {
+            continue;
+          }
+        } else {
+          // Longer claims require at least 2 substantive concepts AND >= 40% substantive coverage
+          if (bestSubstantiveMatched < 2 || bestSubstantiveRatio < 0.4) {
+            continue;
+          }
         }
       }
 
-      // Determine stance based on refutation markers, polarity conflicts, numeric facts, and overlap
+      // Determine stance based on refutation markers, polarity conflicts, numeric facts, and FULL topic coverage
       let computedStance = item.stance;
       if (computedStance === 'mentions') {
         const textNorm = normalizeArabic(toWesternDigits(evFullText)).toLowerCase();
@@ -241,9 +314,8 @@ export class EvidenceAggregator {
           'exaggerated',
         ].map((p) => normalizeArabic(p).toLowerCase());
 
-        // 2. Corroboration / Confirmation / Declarative Attribution patterns
+        // 2. Explicit Confirmation / Corroboration patterns (NO generic reporting verbs like "تعلن" or "أعلن"!)
         const confirmationPatterns = [
-          // Arabic official & corroborating patterns
           'أكدت',
           'أكد',
           'تأكيد',
@@ -252,11 +324,6 @@ export class EvidenceAggregator {
           'بيان رسمي',
           'إعلان رسمي',
           'وثائق تؤكد',
-          'يعلن',
-          'تعلن',
-          'أعلن',
-          'أعلنت',
-          'إعلان',
           'يرجح',
           'رجح',
           'رجحت',
@@ -264,27 +331,16 @@ export class EvidenceAggregator {
           'مسؤولية',
           'تأكد من مقتل',
           'تأكيد مقتل',
-          'توقيع',
-          'اتفاقية',
-          'إقرار',
-          'مصادقة',
-          // English official & corroborating patterns
           'confirmed',
           'confirming',
           'confirms',
           'verified',
           'official statement',
           'officially',
-          'announces',
-          'announced',
-          'announcement',
           'likely',
           'probably',
           'responsible',
           'behind',
-          'signed',
-          'approved',
-          'passed',
         ].map((p) => normalizeArabic(p).toLowerCase());
 
         const hasRefutation = refutationPatterns.some((pattern) => textNorm.includes(pattern));
@@ -292,26 +348,26 @@ export class EvidenceAggregator {
 
         // Check polarity and numeric conflicts against primary claims
         const hasPolarityConflict =
-          bestOverlapCount >= 2 && claims.some((c) => detectPolarityConflict(c.text, evFullText));
+          bestSubstantiveMatched >= 2 && claims.some((c) => detectPolarityConflict(c.text, evFullText));
         const hasNumericConflict =
-          bestOverlapCount >= 2 && claims.some((c) => detectNumericConflict(c.text, evFullText));
+          bestSubstantiveMatched >= 2 && claims.some((c) => detectNumericConflict(c.text, evFullText));
+
+        // High topic coverage required before ANY source can corroborate ("supports") a claim
+        const hasStrongTopicCoverage =
+          claims.length === 0 ||
+          (bestSubstantiveTotal <= 3
+            ? bestSubstantiveMatched === bestSubstantiveTotal
+            : bestSubstantiveMatched >= 3 && bestSubstantiveRatio >= 0.65);
 
         if (hasRefutation || hasPolarityConflict) {
           computedStance = 'refutes';
         } else if (hasNumericConflict) {
           computedStance = 'neutral';
         } else if (
-          // Condition 1: Direct confirmation keyword + meaningful overlap
-          (hasConfirmation &&
-            (claims.length === 0 || (bestOverlapCount >= 2 && (maxTokenRatio >= 0.25 || maxSimWithClaims >= 0.1)))) ||
-          // Condition 2: High semantic match from credible news/wire/official source (Tier 1-3)
-          (tier <= 3 &&
-            item.sourceType !== 'wiki' &&
-            item.sourceType !== 'academic' &&
-            bestOverlapCount >= 3 &&
-            (maxTokenRatio >= 0.45 || maxSimWithClaims >= 0.22)) ||
-          // Condition 3: Wikipedia strict semantic match (only when highly aligned)
-          (item.sourceType === 'wiki' && bestOverlapCount >= 3 && maxTokenRatio >= 0.55)
+          hasStrongTopicCoverage &&
+          ((hasConfirmation && (claims.length === 0 || bestSubstantiveRatio >= 0.65)) ||
+            (tier <= 3 && item.sourceType !== 'wiki' && item.sourceType !== 'academic' && bestSubstantiveRatio >= 0.7) ||
+            (item.sourceType === 'wiki' && bestSubstantiveRatio >= 0.85))
         ) {
           computedStance = 'supports';
         }
@@ -325,9 +381,12 @@ export class EvidenceAggregator {
           reliabilityScore: score,
           stance: computedStance,
         },
-        overlapCount: bestOverlapCount,
-        tokenRatio: maxTokenRatio,
-        sim: maxSimWithClaims,
+        overlapCount: bestSubstantiveMatched,
+        tokenRatio: bestSubstantiveRatio,
+        substantiveMatched: bestSubstantiveMatched,
+        substantiveTotal: bestSubstantiveTotal,
+        substantiveRatio: bestSubstantiveRatio,
+        sim: bestSim,
       });
     }
 

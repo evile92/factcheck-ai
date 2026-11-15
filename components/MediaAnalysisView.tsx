@@ -77,24 +77,70 @@ export const MediaAnalysisView: React.FC<MediaAnalysisViewProps> = ({ imageAnaly
             </div>
           </div>
 
-          {/* AI Likelihood Bar */}
+          {/* Pixel ELA & Manipulation Likelihood */}
           <div className="mt-3 p-3 rounded bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800">
-            <div className="flex items-center justify-between text-xs mb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-1.5">
               <span className="font-bold text-slate-800 dark:text-zinc-200">{t.manipulationTitle}</span>
-              <span className="font-mono font-bold text-slate-900 dark:text-zinc-100">{toWesternDigits(imageAnalysis.aiProbabilityScore)}%</span>
+              <div className="flex items-center gap-3 font-mono tabular-nums text-[11px]">
+                <span className="text-slate-600 dark:text-zinc-400">
+                  ELA: <strong className="text-slate-900 dark:text-zinc-100">{toWesternDigits(imageAnalysis.elaScore)}%</strong>
+                </span>
+                <span className="text-slate-600 dark:text-zinc-400">
+                  AI: <strong className="text-slate-900 dark:text-zinc-100">{toWesternDigits(imageAnalysis.aiProbabilityScore)}%</strong>
+                </span>
+              </div>
             </div>
             <div className="w-full h-1.5 bg-slate-200 dark:bg-zinc-800 rounded overflow-hidden mb-1.5">
               <div
                 className={`h-full ${
-                  imageAnalysis.aiProbabilityScore > 60
+                  Math.max(imageAnalysis.aiProbabilityScore, imageAnalysis.elaScore) > 60
                     ? 'bg-amber-500'
-                    : imageAnalysis.aiProbabilityScore > 30
+                    : Math.max(imageAnalysis.aiProbabilityScore, imageAnalysis.elaScore) > 30
                     ? 'bg-blue-600'
                     : 'bg-emerald-600'
                 }`}
-                style={{ width: `${imageAnalysis.aiProbabilityScore}%` }}
+                style={{ width: `${Math.max(imageAnalysis.aiProbabilityScore, imageAnalysis.elaScore)}%` }}
               />
             </div>
+
+            {imageAnalysis.pixelEla?.analyzed && (
+              <div className="my-2.5 p-2.5 rounded bg-white dark:bg-[#111215] border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                {imageAnalysis.pixelEla.heatmapDataUrl && (
+                  <img
+                    src={imageAnalysis.pixelEla.heatmapDataUrl}
+                    alt={lang === 'ar' ? 'خريطة تباين إعادة الضغط على مستوى البكسلات (ELA)' : 'Pixel ELA Heatmap'}
+                    className="w-full sm:w-40 h-24 object-contain rounded border border-slate-200 dark:border-zinc-800 bg-slate-950 shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0 space-y-1 text-[11px] text-slate-600 dark:text-zinc-300">
+                  <div className="font-bold text-slate-800 dark:text-zinc-200">
+                    {lang === 'ar' ? 'نتائج فحص البكسلات وإعادة الضغط (8×8 JPEG ELA)' : 'Pixel Recompression Analysis (8x8 JPEG ELA)'}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono tabular-nums text-[11px] text-slate-600 dark:text-zinc-400">
+                    <span>
+                      {lang === 'ar' ? 'متوسط الخطأ:' : 'Mean:'}{' '}
+                      <strong className="text-slate-900 dark:text-zinc-100">{toWesternDigits(imageAnalysis.pixelEla.meanError)}</strong>
+                    </span>
+                    <span>
+                      {lang === 'ar' ? 'أقصى فرق كُتلي:' : 'Max Block:'}{' '}
+                      <strong className="text-slate-900 dark:text-zinc-100">{toWesternDigits(imageAnalysis.pixelEla.maxBlockError)}</strong>
+                    </span>
+                    <span>
+                      {lang === 'ar' ? 'نسبة البؤر الشاذة:' : 'Hotspots:'}{' '}
+                      <strong className="text-slate-900 dark:text-zinc-100">
+                        {toWesternDigits((imageAnalysis.pixelEla.hotspotRatio * 100).toFixed(2))}%
+                      </strong>
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug">
+                    {lang === 'ar'
+                      ? 'المناطق الساطعة (البرتقالية/الحمراء) تشير إلى تباين أعلى في إعادة الضغط مقارنة ببقية أجزاء الصورة.'
+                      : 'Brighter orange/red regions indicate higher recompression variance relative to surrounding blocks.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug">
               {imageAnalysis.aiProbabilityDisclaimer}
             </p>

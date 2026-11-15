@@ -171,42 +171,6 @@ export class VideoAnalyzer {
       keyClaims: uniqueTexts.length > 0 ? uniqueTexts.slice(0, 3) : [],
     };
   }
-
-  /**
-   * Synchronous wrapper preserved for compatibility.
-   */
-  generateTimelineAnalysis(
-    durationSeconds = 20,
-    extractedFrames?: Array<{ seconds: number; text?: string; thumbnail?: string }>
-  ): VideoAnalysisResult {
-    const timeline: VideoTimelineFrame[] = [];
-    const interval = Math.max(5, Math.floor(durationSeconds / 4));
-
-    for (let sec = 0; sec <= durationSeconds; sec += interval) {
-      const clientFrame = extractedFrames?.find((f) => Math.abs(f.seconds - sec) < 2);
-      timeline.push({
-        timestamp: this.formatTimestamp(sec),
-        seconds: sec,
-        thumbnailUrl: clientFrame?.thumbnail,
-        ocrText: clientFrame?.text || '',
-        sceneDescription:
-          sec === 0
-            ? 'مشهد البداية ومقدمة الفيديو'
-            : sec === interval
-            ? 'المشهد الرئيسي وحركة العناصر'
-            : 'سياق الحدث وتفاصيل المحيط',
-      });
-    }
-
-    const transcript = extractedFrames?.map((f) => f.text).filter(Boolean).join(' ') || '';
-
-    return {
-      duration: durationSeconds,
-      timeline,
-      transcript,
-      keyClaims: transcript ? [cleanText(transcript)] : [],
-    };
-  }
 }
 
 export const globalVideoAnalyzer = new VideoAnalyzer();

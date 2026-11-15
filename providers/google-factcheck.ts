@@ -4,6 +4,7 @@ import { EvidenceItem } from '@/types';
 export class GoogleFactCheckProvider implements IProvider {
   name = 'Google Fact Check Tools API';
   category = 'factcheck' as const;
+  requiresKey = true;
   private apiKey: string;
 
   constructor() {

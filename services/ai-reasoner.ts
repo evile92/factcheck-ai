@@ -9,13 +9,30 @@ export interface SemanticAssessment {
   editorialSummary?: string;
 }
 
+const VALID_STANCES = new Set<EvidenceItem['stance']>(['supports', 'refutes', 'neutral', 'mentions']);
+
+export interface AIReasonerStatus {
+  configured: boolean;
+  activeProviders: Array<'gemini' | 'openai'>;
+}
+
 /**
  * Optional LLM-backed semantic evidence analyzer (supports GEMINI_API_KEY or OPENAI_API_KEY).
  * Strictly operates ONLY on retrieved evidence items — zero hallucinated sources.
  */
 export class AIReasoner {
+  getProviderStatus(): AIReasonerStatus {
+    const activeProviders: Array<'gemini' | 'openai'> = [];
+    if (process.env.GEMINI_API_KEY?.trim()) activeProviders.push('gemini');
+    if (process.env.OPENAI_API_KEY?.trim()) activeProviders.push('openai');
+    return {
+      configured: activeProviders.length > 0,
+      activeProviders,
+    };
+  }
+
   isConfigured(): boolean {
-    return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim());
+    return this.getProviderStatus().configured;
   }
 
   async refineEvidenceStances(
@@ -52,23 +69,29 @@ Respond ONLY with valid JSON: {"evidenceAssessments":[{"id":"...","relevant":tru
       const openaiKey = process.env.OPENAI_API_KEY?.trim();
 
       if (geminiKey) {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: `${systemInstruction}\n\nINPUT:\n${JSON.stringify(promptPayload)}` }] }],
-              generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
-            }),
-            signal: AbortSignal.timeout(5500),
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: `${systemInstruction}\n\nINPUT:\n${JSON.stringify(promptPayload)}` }] }],
+                generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+              }),
+              signal: AbortSignal.timeout(5500),
+            }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
           }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        } catch {
+          // Fall through cleanly to OpenAI fallback if configured
         }
-      } else if (openaiKey) {
+      }
+
+      if (!jsonText && openaiKey) {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -94,10 +117,11 @@ Respond ONLY with valid JSON: {"evidenceAssessments":[{"id":"...","relevant":tru
 
       if (!jsonText) return { evidence };
 
-      const parsed = JSON.parse(jsonText) as SemanticAssessment;
+      const normalizedJson = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(normalizedJson) as SemanticAssessment;
       const map = new Map<string, { relevant: boolean; stance: EvidenceItem['stance'] }>();
       for (const a of parsed.evidenceAssessments || []) {
-        if (a?.id) {
+        if (a?.id && VALID_STANCES.has(a.stance)) {
           map.set(a.id, { relevant: Boolean(a.relevant), stance: a.stance });
         }
       }

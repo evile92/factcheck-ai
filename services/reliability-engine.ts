@@ -1,4 +1,4 @@
-import { SourceTier } from '@/types';
+import { SourceTier, SourceType } from '@/types';
 
 // Curated lists of high-reliability and low-reliability domains
 const TIER_1_DOMAINS = new Set([
@@ -175,6 +175,35 @@ export class SourceReliabilityEngine {
 
     // Default: Tier 4 for unvetted sources
     return { tier: 4, score: 0.45, isSatire: false };
+  }
+
+  /**
+   * Parses a URL safely and evaluates domain credibility along with inferred sourceType.
+   */
+  evaluateUrl(
+    rawUrl: string,
+    fallbackType?: string
+  ): { domain: string; tier: SourceTier; score: number; isSatire: boolean; sourceType: SourceType } | null {
+    try {
+      const domain = new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, '').trim();
+      if (!domain) return null;
+      const evaluated = this.evaluateSource(domain, fallbackType);
+      const sourceType: SourceType =
+        evaluated.tier === 1
+          ? 'official'
+          : evaluated.tier === 2
+          ? domain.includes('wikipedia.org')
+            ? 'wiki'
+            : domain.includes('factcheck')
+            ? 'factcheck'
+            : 'wire'
+          : evaluated.score <= 0.35
+          ? 'social'
+          : 'news';
+      return { domain, ...evaluated, sourceType };
+    } catch {
+      return null;
+    }
   }
 }
 

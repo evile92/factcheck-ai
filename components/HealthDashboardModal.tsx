@@ -18,6 +18,7 @@ export const HealthDashboardModal: React.FC<HealthDashboardModalProps> = ({ isOp
     status: string;
     timestamp: string;
     cache: { verificationCacheItems: number; providerCacheItems: number };
+    aiEngine?: { configured: boolean; activeProviders: string[] };
     providers: ProviderHealth[];
   } | null>(null);
 
@@ -92,8 +93,18 @@ export const HealthDashboardModal: React.FC<HealthDashboardModalProps> = ({ isOp
             </div>
 
             <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded border border-slate-200 dark:border-zinc-800 col-span-2 sm:col-span-1">
-              <span className="text-[10px] text-slate-500 block mb-0.5">{lang === 'ar' ? 'بروتوكول الطوارئ:' : 'Fallback System:'}</span>
-              <span className="font-bold text-slate-900 dark:text-zinc-100">{lang === 'ar' ? 'تلقائي ونشط 100%' : 'Active'}</span>
+              <span className="text-[10px] text-slate-500 block mb-0.5">
+                {lang === 'ar' ? 'التحكيم الدلالي (AI):' : 'AI Semantic Layer:'}
+              </span>
+              <span className="font-bold text-slate-900 dark:text-zinc-100">
+                {data.aiEngine?.configured
+                  ? lang === 'ar'
+                    ? `نشط (${data.aiEngine.activeProviders.join(' / ').toUpperCase()})`
+                    : `Active (${data.aiEngine.activeProviders.join(' / ').toUpperCase()})`
+                  : lang === 'ar'
+                  ? 'خوارزمي احتياطي (بدون مفتاح)'
+                  : 'Algorithmic Fallback'}
+              </span>
             </div>
           </div>
         )}

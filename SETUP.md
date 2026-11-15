@@ -40,10 +40,14 @@ npm install
 cp .env.example .env.local
 ```
 
-> **ملاحظة مهمة:** التطبيق مهيأ ليعمل بنجاح **100% فورياً حتى بدون إدخال أي مفاتيح API**، حيث يعتمد على مزودات مجانية مفتوحة (Wikipedia REST API، GDELT Project Database، Google News Live RSS، CrossRef Scholarly API، و DuckDuckGo).
-> إذا أردت توسيع حدود الطلبات أو تفعيل واجهة Google Fact Check Tools الرسمية، ضع المفتاح في `.env.local`:
+> **ملاحظة مهمة:** التطبيق مهيأ ليعمل بنجاح **100% فورياً حتى بدون إدخال أي مفاتيح API**، حيث يعتمد على مزودات مجانية مفتوحة (Wikipedia REST API، GDELT Project Database، Google News Live RSS، CrossRef Scholarly API، و DuckDuckGo + Wayback Machine).
+> لتفعيل طبقة التحكيم الدلالي بالذكاء الاصطناعي وزيادة تغطية البحث والمصادر (سواء محلياً في `.env.local` أو في **Netlify Environment Variables**)، يمكنك إضافة المفاتيح الاختيارية التالية:
 > ```env
-> GOOGLE_FACT_CHECK_API_KEY=your_api_key_here
+> GEMINI_API_KEY=your_gemini_key
+> OPENAI_API_KEY=your_openai_key
+> GOOGLE_FACT_CHECK_API_KEY=your_google_factcheck_key
+> NEWS_API_KEY=your_newsapi_key
+> BING_SEARCH_API_KEY=your_bing_search_key
 > ```
 
 ---

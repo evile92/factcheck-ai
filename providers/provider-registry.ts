@@ -3,7 +3,9 @@ import { GoogleFactCheckProvider } from './google-factcheck';
 import { WikipediaProvider } from './wikipedia-provider';
 import { GdeltProvider } from './gdelt-provider';
 import { NewsRssProvider } from './news-rss-provider';
+import { NewsApiProvider } from './newsapi-provider';
 import { OpenSearchProvider } from './open-search-provider';
+import { BingSearchProvider } from './bing-search-provider';
 import { AcademicProvider } from './academic-provider';
 import { EvidenceItem, ProviderHealth } from '@/types';
 import { providerCache } from '@/lib/cache';
@@ -19,7 +21,9 @@ export class ProviderRegistry {
     this.register(new WikipediaProvider());
     this.register(new GdeltProvider());
     this.register(new NewsRssProvider());
+    this.register(new NewsApiProvider());
     this.register(new OpenSearchProvider());
+    this.register(new BingSearchProvider());
     this.register(new AcademicProvider());
   }
 
@@ -53,6 +57,10 @@ export class ProviderRegistry {
     const tasks: Promise<ProviderResponse | null>[] = [];
 
     for (const provider of this.providers) {
+      if (!provider.isConfigured()) {
+        continue;
+      }
+
       if (provider.category === 'academic') {
         if (isScientific) {
           // CrossRef DOIs are predominantly in English
@@ -133,10 +141,11 @@ export class ProviderRegistry {
         };
 
         const configured = provider.isConfigured();
+        const needsKey = Boolean(provider.requiresKey);
         const pingRes = configured ? await provider.ping().catch(() => ({ active: false, latencyMs: 0 })) : { active: false, latencyMs: 0 };
 
         let status: 'active' | 'degraded' | 'offline' = 'active';
-        if (!configured && provider.name.includes('Google Fact Check')) {
+        if (!configured && needsKey) {
           status = 'degraded';
         } else if (!pingRes.active) {
           status = 'offline';
@@ -156,7 +165,7 @@ export class ProviderRegistry {
           latencyMs: pingRes.latencyMs || stats.lastLatency || 0,
           lastChecked: nowIso,
           freeTier: true,
-          requiresKey: provider.name.includes('Google Fact Check'),
+          requiresKey: needsKey,
           hasKey: configured,
           errorCount: stats.errorCount,
         } satisfies ProviderHealth;

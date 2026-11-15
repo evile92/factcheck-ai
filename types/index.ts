@@ -53,6 +53,15 @@ export interface ImageAnalysisResult {
   exif: Record<string, any>;
   hasExif: boolean;
   elaScore: number; // 0 - 100
+  pixelEla?: {
+    analyzed: boolean;
+    method: 'jpeg_recompression' | 'metadata_only';
+    meanError: number;
+    maxBlockError: number;
+    stdDev: number;
+    hotspotRatio: number;
+    heatmapDataUrl?: string;
+  };
   aiProbabilityScore: number; // 0 - 100
   aiProbabilityDisclaimer: string;
   earliestSeenMatch?: {

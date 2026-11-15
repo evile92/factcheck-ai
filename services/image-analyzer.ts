@@ -1,5 +1,9 @@
 import { ImageAnalysisResult } from '@/types';
 import * as exifr from 'exifr';
+import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { cleanText } from '@/lib/text-utils';
 import { detectLanguage } from '@/lib/language';
 
@@ -26,20 +30,45 @@ const EDITING_SOFTWARE_MARKERS = ['photoshop', 'gimp', 'canva', 'lightroom', 'af
 
 export class ImageAnalyzer {
   /**
-   * Performs OCR text extraction using Tesseract.js.
+   * Performs OCR text extraction using Tesseract.js with serverless-safe worker path and timeout guard.
    */
   async extractTextOcr(buffer: Buffer): Promise<{ text: string; confidence: number }> {
+    let worker: { recognize: (buf: Buffer) => Promise<any>; terminate: () => Promise<any> } | null = null;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+
     try {
       const { createWorker } = await import('tesseract.js');
-      const worker = await createWorker(['ara', 'eng']);
-      const ret = await worker.recognize(buffer);
-      const text = cleanText(ret.data.text || '');
-      const confidence = Math.round(ret.data.confidence || 0);
-      await worker.terminate();
-      return { text, confidence };
+      const candidateWorker = path.join(process.cwd(), 'node_modules/tesseract.js/src/worker-script/node/index.js');
+      const workerOptions: Record<string, any> = {
+        cachePath: os.tmpdir(),
+        errorHandler: () => {},
+      };
+      if (fs.existsSync(candidateWorker)) {
+        workerOptions.workerPath = candidateWorker;
+      }
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timerId = setTimeout(() => reject(new Error('OCR timeout')), 10000);
+      });
+
+      const runOcr = async () => {
+        worker = await createWorker(['ara', 'eng'], undefined, workerOptions);
+        const ret = await worker.recognize(buffer);
+        return {
+          text: cleanText(ret.data.text || ''),
+          confidence: Math.round(ret.data.confidence || 0),
+        };
+      };
+
+      return await Promise.race([runOcr(), timeoutPromise]);
     } catch (err: any) {
-      console.warn('OCR processing skipped or encountered warning:', err.message);
+      console.warn('OCR processing skipped or encountered warning:', err?.message || err);
       return { text: '', confidence: 0 };
+    } finally {
+      if (timerId) clearTimeout(timerId);
+      if (worker) {
+        await (worker as any).terminate().catch(() => {});
+      }
     }
   }
 
@@ -58,6 +87,211 @@ export class ImageAnalyzer {
       }
     }
     return null;
+  }
+
+  private isJpegBuffer(buffer: Buffer): boolean {
+    return buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+
+  /**
+   * Builds a compact amplified ELA heatmap preview (max 300px wide) comparing original vs recompressed pixels.
+   */
+  private buildElaHeatmapDataUrl(
+    orig: { width: number; height: number; data: Uint8Array },
+    recomp: { width: number; height: number; data: Uint8Array }
+  ): string | undefined {
+    try {
+      const scale = Math.max(1, Math.ceil(Math.max(orig.width, orig.height) / 300));
+      const hw = Math.max(1, Math.floor(orig.width / scale));
+      const hh = Math.max(1, Math.floor(orig.height / scale));
+      const heatmapRgba = new Uint8Array(hw * hh * 4);
+
+      for (let py = 0; py < hh; py++) {
+        const sy = Math.min(orig.height - 1, py * scale);
+        for (let px = 0; px < hw; px++) {
+          const sx = Math.min(orig.width - 1, px * scale);
+          const srcIdx = (sy * orig.width + sx) * 4;
+          const err =
+            (Math.abs(orig.data[srcIdx] - recomp.data[srcIdx]) +
+              Math.abs(orig.data[srcIdx + 1] - recomp.data[srcIdx + 1]) +
+              Math.abs(orig.data[srcIdx + 2] - recomp.data[srcIdx + 2])) /
+            3;
+
+          const amplified = Math.min(255, Math.round(err * 28));
+          const outIdx = (py * hw + px) * 4;
+
+          if (amplified < 45) {
+            heatmapRgba[outIdx] = 10;
+            heatmapRgba[outIdx + 1] = 20 + Math.round(amplified * 0.8);
+            heatmapRgba[outIdx + 2] = 45 + amplified * 2;
+          } else if (amplified < 140) {
+            const t = (amplified - 45) / 95;
+            heatmapRgba[outIdx] = Math.round(30 + t * 220);
+            heatmapRgba[outIdx + 1] = Math.round(130 + t * 65);
+            heatmapRgba[outIdx + 2] = Math.round(180 - t * 140);
+          } else {
+            const t = (amplified - 140) / 115;
+            heatmapRgba[outIdx] = 255;
+            heatmapRgba[outIdx + 1] = Math.max(25, Math.round(170 - t * 145));
+            heatmapRgba[outIdx + 2] = 24;
+          }
+          heatmapRgba[outIdx + 3] = 255;
+        }
+      }
+
+      const encoded = encodeJpeg({ width: hw, height: hh, data: heatmapRgba }, 72);
+      return `data:image/jpeg;base64,${Buffer.from(encoded.data).toString('base64')}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Performs genuine JPEG recompression Error Level Analysis (ELA) across 8x8 DCT blocks.
+   */
+  private performPixelEla(buffer: Buffer): {
+    pixelEla: NonNullable<ImageAnalysisResult['pixelEla']>;
+    pixelScore: number;
+    indicator?: string;
+  } {
+    const emptyResult: NonNullable<ImageAnalysisResult['pixelEla']> = {
+      analyzed: false,
+      method: 'metadata_only',
+      meanError: 0,
+      maxBlockError: 0,
+      stdDev: 0,
+      hotspotRatio: 0,
+    };
+
+    if (!this.isJpegBuffer(buffer)) {
+      return {
+        pixelEla: emptyResult,
+        pixelScore: 0,
+        indicator:
+          'تحليل تباين الضغط على مستوى البكسلات (ELA) ينطبق على صور JPEG؛ تم الاعتماد على فحص البنية والبيانات الوصفية لهذه الصيغة.',
+      };
+    }
+
+    try {
+      const orig = decodeJpeg(buffer, {
+        useTArray: true,
+        formatAsRGBA: true,
+        tolerantDecoding: true,
+        maxResolutionInMP: 25,
+        maxMemoryUsageInMB: 128,
+      });
+
+      if (orig.width < 16 || orig.height < 16) {
+        return { pixelEla: emptyResult, pixelScore: 0 };
+      }
+
+      const recompressed = encodeJpeg({ width: orig.width, height: orig.height, data: orig.data }, 90);
+      const recomp = decodeJpeg(recompressed.data, {
+        useTArray: true,
+        formatAsRGBA: true,
+        tolerantDecoding: true,
+        maxResolutionInMP: 25,
+        maxMemoryUsageInMB: 128,
+      });
+
+      if (recomp.width !== orig.width || recomp.height !== orig.height || recomp.data.length !== orig.data.length) {
+        return { pixelEla: emptyResult, pixelScore: 0 };
+      }
+
+      const blocksX = Math.floor(orig.width / 8);
+      const blocksY = Math.floor(orig.height / 8);
+      const totalBlocks = blocksX * blocksY;
+      if (totalBlocks < 4) {
+        return { pixelEla: emptyResult, pixelScore: 0 };
+      }
+
+      const blockMeans = new Float32Array(totalBlocks);
+      let blockIdx = 0;
+      let sumMeans = 0;
+
+      for (let by = 0; by < blocksY; by++) {
+        const y0 = by * 8;
+        for (let bx = 0; bx < blocksX; bx++) {
+          const x0 = bx * 8;
+          let blockSum = 0;
+          for (let dy = 0; dy < 8; dy++) {
+            const rowOffset = ((y0 + dy) * orig.width + x0) * 4;
+            for (let dx = 0; dx < 8; dx++) {
+              const idx = rowOffset + dx * 4;
+              blockSum +=
+                (Math.abs(orig.data[idx] - recomp.data[idx]) +
+                  Math.abs(orig.data[idx + 1] - recomp.data[idx + 1]) +
+                  Math.abs(orig.data[idx + 2] - recomp.data[idx + 2])) /
+                3;
+            }
+          }
+          const blockMean = blockSum / 64;
+          blockMeans[blockIdx++] = blockMean;
+          sumMeans += blockMean;
+        }
+      }
+
+      const meanError = sumMeans / totalBlocks;
+      let sqSum = 0;
+      for (let i = 0; i < totalBlocks; i++) {
+        const d = blockMeans[i] - meanError;
+        sqSum += d * d;
+      }
+      const stdDev = Math.sqrt(sqSum / totalBlocks);
+
+      const sorted = Float32Array.from(blockMeans).sort();
+      const median = sorted[Math.floor(totalBlocks * 0.5)];
+      const p95 = sorted[Math.min(totalBlocks - 1, Math.floor(totalBlocks * 0.95))];
+      const maxBlockError = sorted[totalBlocks - 1];
+
+      const outlierThreshold = Math.max(median * 2.4, meanError + 2.2 * stdDev, 1.8);
+      let outlierBlocks = 0;
+      for (let i = 0; i < totalBlocks; i++) {
+        if (blockMeans[i] > outlierThreshold) {
+          outlierBlocks++;
+        }
+      }
+
+      const hotspotRatio = outlierBlocks / totalBlocks;
+      const spread = Math.max(0, p95 - median);
+      const peakDelta = Math.max(0, maxBlockError - median);
+      const relativeSd = meanError > 0.1 ? stdDev / meanError : 0;
+
+      let pixelScore = Math.min(18, Math.round(meanError * 3.0 + stdDev * 6.0));
+      if (spread > 1.0) {
+        pixelScore += Math.min(20, Math.round((spread - 1.0) * 12));
+      }
+      if (hotspotRatio >= 0.005 && peakDelta >= 1.4) {
+        pixelScore += Math.min(50, Math.round(hotspotRatio * 240 + peakDelta * 10 + relativeSd * 18));
+      }
+      pixelScore = Math.min(82, Math.max(0, pixelScore));
+
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const heatmapDataUrl = this.buildElaHeatmapDataUrl(orig, recomp);
+
+      let indicator: string;
+      if (hotspotRatio >= 0.008 && peakDelta >= 1.4) {
+        indicator = `رصد فحص البكسلات (ELA) بؤراً شاذة في تباين إعادة الضغط بنسبة ${(hotspotRatio * 100).toFixed(1)}% (أقصى فرق كُتلي: ${round2(maxBlockError)})، مما قد يشير إلى قص أو تعديل موضعي داخل الصورة.`;
+      } else {
+        indicator = `فحص تباين إعادة ضغط البكسلات (ELA) لم يرصد بؤراً موضعية شاذة (متوسط الفرق: ${round2(meanError)}، أقصى فرق: ${round2(maxBlockError)}).`;
+      }
+
+      return {
+        pixelEla: {
+          analyzed: true,
+          method: 'jpeg_recompression',
+          meanError: round2(meanError),
+          maxBlockError: round2(maxBlockError),
+          stdDev: round2(stdDev),
+          hotspotRatio: Math.round(hotspotRatio * 10000) / 10000,
+          heatmapDataUrl,
+        },
+        pixelScore,
+        indicator,
+      };
+    } catch {
+      return { pixelEla: emptyResult, pixelScore: 0 };
+    }
   }
 
   /**
@@ -123,22 +357,33 @@ export class ImageAnalyzer {
     const ocrConfidence = ocrResult.confidence;
     const detectedLang = ocrText ? detectLanguage(ocrText).code : 'ar';
 
-    // 3. Compression / Metadata Integrity Indicator
-    let elaScore = 15;
+    // 3. Pixel-level Compression & Metadata Integrity Indicator (ELA)
+    const { pixelEla, pixelScore, indicator: elaIndicator } = this.performPixelEla(buffer);
+    if (elaIndicator) {
+      manipulationIndicators.push(elaIndicator);
+    }
+
+    const hasEditingSoftware = manipulationIndicators.some((m) => m.includes('تحرير رقمي'));
+    let elaScore = pixelEla.analyzed ? pixelScore : 10;
+
     if (!hasExif && (mimeType.includes('jpeg') || mimeType.includes('webp'))) {
-      elaScore += 20;
+      elaScore += pixelEla.analyzed ? 8 : 15;
       manipulationIndicators.push('البيانات الوصفية (EXIF) مفقودة أو تم تجريدها، وهو نمط شائع عند إعادة النشر عبر منصات التواصل.');
     }
-    if (manipulationIndicators.some((m) => m.includes('تحرير رقمي'))) {
-      elaScore += 30;
+    if (hasEditingSoftware) {
+      elaScore += 25;
     }
+
+    elaScore = Math.min(100, Math.max(0, elaScore));
 
     // 4. AI Generation Likelihood Score (conservative unless explicit metadata/C2PA signature is found)
     let aiScore = 10;
     if (aiMarkerDetected) {
       aiScore = 88;
+    } else if (pixelEla.analyzed && pixelEla.hotspotRatio >= 0.008 && pixelEla.maxBlockError - pixelEla.meanError >= 1.2) {
+      aiScore = 40;
     } else if (elaScore >= 45) {
-      aiScore = 25;
+      aiScore = 28;
     }
 
     return {
@@ -147,10 +392,11 @@ export class ImageAnalyzer {
       language: detectedLang,
       exif: exifData,
       hasExif,
-      elaScore: Math.min(100, Math.max(0, elaScore)),
+      elaScore,
+      pixelEla,
       aiProbabilityScore: Math.min(100, Math.max(0, aiScore)),
       aiProbabilityDisclaimer:
-        'مؤشر احتمالي يعتمد على فحص البيانات الوصفية وتوقيعات البرمجيات (EXIF/XMP/C2PA)، ولا يُعد وحده دليلاً قاطعاً دون تحقق بصري.',
+        'مؤشر يجمع فحص البيانات الوصفية وتوقيعات البرمجيات (EXIF/XMP/C2PA) مع تحليل تباين الضغط على مستوى البكسلات (ELA)، ولا يُعد وحده دليلاً قاطعاً على التوليد بالذكاء الاصطناعي دون تحقق بصري.',
       manipulationIndicators,
     };
   }
